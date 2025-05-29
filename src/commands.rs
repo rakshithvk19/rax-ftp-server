@@ -1,3 +1,4 @@
+use crate::auth::AuthState;
 use crate::server::ServerState;
 
 use log::{error, info};
@@ -50,100 +51,138 @@ pub fn handle_command(
 
     match command {
         Command::Quit => {
-            let _ = stream.write_all(b"221 Goodbye\r\n");
-            return CommandResult::Quit;
+            return handle_quit(auth_state, stream);
         }
         Command::User(username) => {
-            // state.auth.handle_user(&username, stream);
-            auth_state.handle_user(&username, stream);
-            return CommandResult::Wait;
+            return handle_cmd_user(auth_state, username, stream);
         }
         Command::Pass(password) => {
-            auth_state.handle_pass(&password, stream);
-            return CommandResult::Wait;
+            return handle_pass(auth_state, password, stream);
         }
         Command::List => {
-            if !auth_state.is_logged_in() {
-                let _ = stream.write_all(b"530 Not logged in\r\n");
-                return CommandResult::Continue;
-            } else {
-                let _ = stream.write_all(b"150 Opening data connection\r\n");
-
-                match fs::read_dir(".") {
-                    Ok(entries) => {
-                        let mut file_list = String::new();
-
-                        for entry in entries {
-                            if let Ok(entry) = entry {
-                                file_list.push_str(&format!(
-                                    "{}\r\n",
-                                    entry.file_name().to_string_lossy()
-                                ));
-                            }
-                        }
-
-                        let _ = stream.write_all(file_list.as_bytes());
-                    }
-                    Err(e) => {
-                        error!("Failed to read directory: {}", e);
-                        let _ = stream.write_all(b"550 Failed to list directory\r\n");
-                    }
-                }
-                return CommandResult::Continue;
-            }
+            return handle_list(auth_state, stream);
         }
         Command::Retr(filename) => {
-            if !auth_state.is_logged_in() {
-                let _ = stream.write_all(b"530 Not logged in\r\n");
-                return CommandResult::Continue;
-            } else {
-                //Check if input is file or dir
+            return handle_retr(auth_state, &filename, stream);
+        }
+        Command::Unknown(cmd) => {
+            return handle_unknown(auth_state, stream, &cmd);
+        }
+    }
+}
 
-                //Check if file exists in current directory
-                if !fs::metadata(&filename).is_ok() {
-                    let _ = stream.write_all(b"550 File not found \r\n");
-                    return CommandResult::Continue;
-                } else {
-                    let _ = stream.write_all(b"150 Opening data connection\r\n");
+// Command handler for QUIT
+fn handle_quit(_auth_state: &mut AuthState, stream: &mut TcpStream) -> CommandResult {
+    let _ = stream.write_all(b"221 Goodbye\r\n");
+    return CommandResult::Quit;
+}
 
-                    // Open the file and stream its content
-                    match fs::File::open(&filename) {
-                        Ok(mut file) => {
-                            if let Err(e) = std::io::copy(&mut file, stream) {
-                                error!("Failed to read file: {}", e);
-                                let _ = stream.write_all(
-                                    b"451 Requested action aborted: local error in processing.\r\n",
-                                );
-                            } else {
-                                match stream.flush() {
-                                    Ok(_) => {
-                                        info!("File {} sent successfully", filename);
-                                        let _ = stream.write_all(b"226 Transfer complete\r\n");
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to flush stream: {}", e);
-                                    }
-                                }
+// Command handler for PASS
+fn handle_pass(
+    auth_state: &mut AuthState,
+    password: String,
+    stream: &mut TcpStream,
+) -> CommandResult {
+    auth_state.handle_pass(&password, stream);
+    return CommandResult::Wait;
+}
+
+// Command handler for RETR
+fn handle_retr(
+    auth_state: &mut AuthState,
+    filename: &String,
+    stream: &mut TcpStream,
+) -> CommandResult {
+    if !auth_state.is_logged_in() {
+        let _ = stream.write_all(b"530 Not logged in\r\n");
+        return CommandResult::Continue;
+    } else {
+        //Check if input is file or dir
+
+        //Check if file exists in current directory
+        if !fs::metadata(&filename).is_ok() {
+            let _ = stream.write_all(b"550 File not found \r\n");
+            return CommandResult::Continue;
+        } else {
+            let _ = stream.write_all(b"150 Opening data connection\r\n");
+
+            // Open the file and stream its content
+            match fs::File::open(&filename) {
+                Ok(mut file) => {
+                    if let Err(e) = std::io::copy(&mut file, stream) {
+                        error!("Failed to read file: {}", e);
+                        let _ = stream.write_all(
+                            b"451 Requested action aborted: local error in processing.\r\n",
+                        );
+                    } else {
+                        match stream.flush() {
+                            Ok(_) => {
+                                info!("File {} sent successfully", filename);
+                                let _ = stream.write_all(b"226 Transfer complete\r\n");
                             }
-                        }
-                        Err(e) => {
-                            error!("Failed to open file: {}", e);
-                            let _ = stream.write_all(b"550 Failed to open file\r\n");
+                            Err(e) => {
+                                error!("Failed to flush stream: {}", e);
+                            }
                         }
                     }
                 }
+                Err(e) => {
+                    error!("Failed to open file: {}", e);
+                    let _ = stream.write_all(b"550 Failed to open file\r\n");
+                }
             }
-            return CommandResult::Continue;
-        }
-        Command::Unknown(cmd) => {
-            if !auth_state.is_logged_in() {
-                let _ = stream.write_all(b"530 Not logged in\r\n");
-            } else if cmd == "rax" {
-                let _ = stream.write_all(b"Rax is the best\r\n");
-            } else {
-                let _ = stream.write_all(b"500 Unknown command\r\n");
-            }
-            return CommandResult::Continue;
         }
     }
+    return CommandResult::Continue;
+}
+
+// Command handler for USER
+fn handle_cmd_user(
+    auth_state: &mut AuthState,
+    username: String,
+    stream: &mut TcpStream,
+) -> CommandResult {
+    auth_state.handle_user(&username, stream);
+    return CommandResult::Wait;
+}
+
+// Command handler for LIST
+fn handle_list(auth_state: &mut AuthState, stream: &mut TcpStream) -> CommandResult {
+    if !auth_state.is_logged_in() {
+        let _ = stream.write_all(b"530 Not logged in\r\n");
+        return CommandResult::Continue;
+    } else {
+        let _ = stream.write_all(b"150 Opening data connection\r\n");
+
+        match fs::read_dir(".") {
+            Ok(entries) => {
+                let mut file_list = String::new();
+
+                for entry in entries {
+                    if let Ok(entry) = entry {
+                        file_list.push_str(&format!("{}\r\n", entry.file_name().to_string_lossy()));
+                    }
+                }
+
+                let _ = stream.write_all(file_list.as_bytes());
+            }
+            Err(e) => {
+                error!("Failed to read directory: {}", e);
+                let _ = stream.write_all(b"550 Failed to list directory\r\n");
+            }
+        }
+        return CommandResult::Continue;
+    }
+}
+
+// Command handler for unknown commands
+fn handle_unknown(auth_state: &mut AuthState, stream: &mut TcpStream, cmd: &str) -> CommandResult {
+    if !auth_state.is_logged_in() {
+        let _ = stream.write_all(b"530 Not logged in\r\n");
+    } else if cmd == "rax" {
+        let _ = stream.write_all(b"Rax is the best\r\n");
+    } else {
+        let _ = stream.write_all(b"500 Unknown command\r\n");
+    }
+    return CommandResult::Continue;
 }
