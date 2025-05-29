@@ -15,6 +15,13 @@ pub enum Command {
     Unknown(String),
 }
 
+#[derive(Debug, PartialEq)]
+pub enum CommandResult {
+    Quit,
+    Wait,
+    Continue,
+}
+
 // Parse raw command string into Command enum
 pub fn parse_command(raw: &str) -> Command {
     let raw = raw.trim();
@@ -33,23 +40,31 @@ pub fn parse_command(raw: &str) -> Command {
 }
 
 // Handle a single command and update state
-pub fn handle_command(state: &mut ServerState, command: Command, stream: &mut TcpStream) {
+pub fn handle_command(
+    state: &mut ServerState,
+    command: Command,
+    stream: &mut TcpStream,
+) -> CommandResult {
     let auth_state = state.get_auth();
 
     match command {
         Command::Quit => {
             let _ = stream.write_all(b"221 Goodbye\r\n");
+            return CommandResult::Quit;
         }
         Command::User(username) => {
             // state.auth.handle_user(&username, stream);
             auth_state.handle_user(&username, stream);
+            return CommandResult::Wait;
         }
         Command::Pass(password) => {
             auth_state.handle_pass(&password, stream);
+            return CommandResult::Wait;
         }
         Command::List => {
             if !auth_state.is_logged_in() {
                 let _ = stream.write_all(b"530 Not logged in\r\n");
+                return CommandResult::Wait;
             } else {
                 let _ = stream.write_all(b"150 Opening data connection\r\n");
 
@@ -65,7 +80,7 @@ pub fn handle_command(state: &mut ServerState, command: Command, stream: &mut Tc
                                 ));
                             }
                         }
-                        
+
                         let _ = stream.write_all(file_list.as_bytes());
                         let _ = stream.write_all(b"226 Transfer complete\r\n");
                     }
@@ -74,6 +89,7 @@ pub fn handle_command(state: &mut ServerState, command: Command, stream: &mut Tc
                         let _ = stream.write_all(b"550 Failed to list directory\r\n");
                     }
                 }
+                return CommandResult::Continue;
             }
         }
         Command::Unknown(cmd) => {
@@ -84,6 +100,7 @@ pub fn handle_command(state: &mut ServerState, command: Command, stream: &mut Tc
             } else {
                 let _ = stream.write_all(b"500 Unknown command\r\n");
             }
+            return CommandResult::Continue;
         }
     }
 }

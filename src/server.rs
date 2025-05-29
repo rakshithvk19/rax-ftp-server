@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 
 use crate::auth::AuthState;
-use crate::commands::{handle_command, parse_command};
+use crate::commands::{CommandResult, handle_command, parse_command};
 
 // Server state for each client
 #[derive(Default)]
@@ -49,9 +49,21 @@ pub fn handle_client(mut stream: TcpStream) {
                         command
                     );
 
-                    handle_command(&mut state, command, &mut stream);
+                    let command_result = handle_command(&mut state, command, &mut stream);
 
                     command_buffer.clear();
+
+                    if command_result == CommandResult::Quit {
+                        info!(
+                            "Client {} requested to {:?}",
+                            stream.peer_addr().unwrap(),
+                            command_result
+                        );
+                        break;
+                    } else if command_result == CommandResult::Wait {
+                        // Wait for more commands
+                        continue;
+                    }
                 }
             }
             Err(e) => {

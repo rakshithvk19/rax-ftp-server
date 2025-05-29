@@ -13,3 +13,8 @@
     - implement error codes (4xx, 5xx)
     - add proper error messages
     - document response code meanings
+
+
+BUGS
+1. Cargo should stop on quit
+2. 
