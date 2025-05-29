@@ -1,8 +1,9 @@
-// src/main.rs
-mod server;
 use log::{error, info};
-use server::handle_client;
 use std::net::TcpListener;
+
+mod auth;
+mod commands;
+mod server;
 
 fn main() -> std::io::Result<()> {
     env_logger::init();
@@ -15,7 +16,7 @@ fn main() -> std::io::Result<()> {
             Ok(stream) => {
                 info!("New connection: {}", stream.peer_addr()?);
                 std::thread::spawn(|| {
-                    handle_client(stream);
+                    server::handle_client(stream);
                 });
             }
             Err(e) => error!("Error accepting connection: {}", e),
