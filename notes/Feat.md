@@ -16,5 +16,8 @@
 
 
 BUGS
-1. Cargo should stop on quit
-2. 
+1. Cargo should stop on quit use TcpStream::Shutdown
+2. //Check if input is file or dir in RETR
+3. Use ZKPs for Auth ZK lib in rust
+4. throw error when there is an error while streaming mid way.
+

@@ -59,6 +59,9 @@ pub fn handle_client(mut stream: TcpStream) {
                             stream.peer_addr().unwrap(),
                             command_result
                         );
+
+                        // Shutdown the connection gracefully, use TcpStream::shutdown
+
                         break;
                     } else if command_result == CommandResult::Wait {
                         // Wait for more commands
