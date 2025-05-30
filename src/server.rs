@@ -15,14 +15,9 @@ impl ServerState {
     pub fn get_auth(&mut self) -> &mut AuthState {
         &mut self.auth
     }
-
-    // pub fn set_auth(&mut self, auth: AuthState) {
-    //     self.auth = auth;
-    // }
 }
 
 pub fn handle_client(mut stream: TcpStream) {
-    // Send welcome message
     if let Err(e) = stream.write_all(b"220 Welcome to the FTP server\r\n") {
         error!("Failed to send welcome: {}", e);
         return;
@@ -53,19 +48,28 @@ pub fn handle_client(mut stream: TcpStream) {
 
                     command_buffer.clear();
 
-                    if command_result == CommandResult::Quit {
-                        info!(
-                            "Client {} requested to {:?}",
-                            stream.peer_addr().unwrap(),
-                            command_result
-                        );
+                    match command_result {
+                        CommandResult::Quit => {
+                            info!(
+                                "Client {} requested to {:?}",
+                                stream.peer_addr().unwrap(),
+                                command_result
+                            );
+                            let _ = stream.shutdown(std::net::Shutdown::Both);
+                            break;
+                        }
+                        CommandResult::Continue => {
+                            continue;
+                        }
+                        CommandResult::Stor => {
+                            info!(
+                                "Client {} requested to store data",
+                                stream.peer_addr().unwrap()
+                            );
 
-                        // Shutdown the connection gracefully, use TcpStream::shutdown
-
-                        break;
-                    } else if command_result == CommandResult::Wait {
-                        // Wait for more commands
-                        continue;
+                            let _ = stream.write_all(b"150 Opening data connection\r\n");
+                            let _ = stream.flush();
+                        }
                     }
                 }
             }

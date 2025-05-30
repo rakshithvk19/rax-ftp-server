@@ -14,14 +14,15 @@ pub enum Command {
     Pass(String),
     List,
     Retr(String),
+    Stor(String),
     Unknown(String),
 }
 
 #[derive(Debug, PartialEq)]
 pub enum CommandResult {
     Quit,
-    Wait,
     Continue,
+    Stor,
 }
 
 // Parse raw command string into Command enum
@@ -37,6 +38,7 @@ pub fn parse_command(raw: &str) -> Command {
         "PASS" => Command::Pass(arg.to_string()),
         "LIST" => Command::List,
         "RETR" => Command::Retr(arg.to_string()),
+        "STOR" => Command::Stor(arg.to_string()),
         _ => Command::Unknown(trimmed.to_string()),
     }
 }
@@ -50,63 +52,48 @@ pub fn handle_command(
     let auth_state = state.get_auth();
 
     match command {
-        Command::Quit => {
-            return handle_quit(auth_state, stream);
-        }
-        Command::User(username) => {
-            return handle_cmd_user(auth_state, username, stream);
-        }
-        Command::Pass(password) => {
-            return handle_pass(auth_state, password, stream);
-        }
-        Command::List => {
-            return handle_list(auth_state, stream);
-        }
-        Command::Retr(filename) => {
-            return handle_retr(auth_state, &filename, stream);
-        }
-        Command::Unknown(cmd) => {
-            return handle_unknown(auth_state, stream, &cmd);
-        }
+        Command::Quit => handle_cmd_quit(auth_state, stream),
+        Command::User(username) => handle_cmd_user(auth_state, username, stream),
+        Command::Pass(password) => handle_cmd_pass(auth_state, password, stream),
+        Command::List => handle_cmd_list(auth_state, stream),
+        Command::Retr(filename) => handle_cmd_retr(auth_state, &filename, stream),
+        Command::Stor(filename) => handle_cmd_stor(auth_state, &filename, stream),
+        Command::Unknown(cmd) => handle_cmd_unknown(auth_state, stream, &cmd),
     }
 }
 
 // Command handler for QUIT
-fn handle_quit(_auth_state: &mut AuthState, stream: &mut TcpStream) -> CommandResult {
+fn handle_cmd_quit(_auth_state: &mut AuthState, stream: &mut TcpStream) -> CommandResult {
     let _ = stream.write_all(b"221 Goodbye\r\n");
-    return CommandResult::Quit;
+    CommandResult::Quit
 }
 
 // Command handler for PASS
-fn handle_pass(
+fn handle_cmd_pass(
     auth_state: &mut AuthState,
     password: String,
     stream: &mut TcpStream,
 ) -> CommandResult {
     auth_state.handle_pass(&password, stream);
-    return CommandResult::Wait;
+    CommandResult::Continue
 }
 
 // Command handler for RETR
-fn handle_retr(
+fn handle_cmd_retr(
     auth_state: &mut AuthState,
     filename: &String,
     stream: &mut TcpStream,
 ) -> CommandResult {
     if !auth_state.is_logged_in() {
         let _ = stream.write_all(b"530 Not logged in\r\n");
-        return CommandResult::Continue;
+        CommandResult::Continue
     } else {
-        //Check if input is file or dir
-
-        //Check if file exists in current directory
         if !fs::metadata(&filename).is_ok() {
             let _ = stream.write_all(b"550 File not found \r\n");
-            return CommandResult::Continue;
+            CommandResult::Continue
         } else {
             let _ = stream.write_all(b"150 Opening data connection\r\n");
 
-            // Open the file and stream its content
             match fs::File::open(&filename) {
                 Ok(mut file) => {
                     if let Err(e) = std::io::copy(&mut file, stream) {
@@ -131,9 +118,9 @@ fn handle_retr(
                     let _ = stream.write_all(b"550 Failed to open file\r\n");
                 }
             }
+            CommandResult::Continue
         }
     }
-    return CommandResult::Continue;
 }
 
 // Command handler for USER
@@ -143,14 +130,14 @@ fn handle_cmd_user(
     stream: &mut TcpStream,
 ) -> CommandResult {
     auth_state.handle_user(&username, stream);
-    return CommandResult::Wait;
+    CommandResult::Continue
 }
 
 // Command handler for LIST
-fn handle_list(auth_state: &mut AuthState, stream: &mut TcpStream) -> CommandResult {
+fn handle_cmd_list(auth_state: &mut AuthState, stream: &mut TcpStream) -> CommandResult {
     if !auth_state.is_logged_in() {
         let _ = stream.write_all(b"530 Not logged in\r\n");
-        return CommandResult::Continue;
+        CommandResult::Continue
     } else {
         let _ = stream.write_all(b"150 Opening data connection\r\n");
 
@@ -171,12 +158,16 @@ fn handle_list(auth_state: &mut AuthState, stream: &mut TcpStream) -> CommandRes
                 let _ = stream.write_all(b"550 Failed to list directory\r\n");
             }
         }
-        return CommandResult::Continue;
+        CommandResult::Continue
     }
 }
 
 // Command handler for unknown commands
-fn handle_unknown(auth_state: &mut AuthState, stream: &mut TcpStream, cmd: &str) -> CommandResult {
+fn handle_cmd_unknown(
+    auth_state: &mut AuthState,
+    stream: &mut TcpStream,
+    cmd: &str,
+) -> CommandResult {
     if !auth_state.is_logged_in() {
         let _ = stream.write_all(b"530 Not logged in\r\n");
     } else if cmd == "rax" {
@@ -184,5 +175,54 @@ fn handle_unknown(auth_state: &mut AuthState, stream: &mut TcpStream, cmd: &str)
     } else {
         let _ = stream.write_all(b"500 Unknown command\r\n");
     }
-    return CommandResult::Continue;
+    CommandResult::Continue
+}
+
+fn handle_cmd_stor(
+    auth_state: &mut AuthState,
+    filename: &String,
+    stream: &mut TcpStream,
+) -> CommandResult {
+    // user auth
+    if !auth_state.is_logged_in() {
+        let _ = stream.write_all(b"530 Not logged in\r\n");
+        CommandResult::Continue
+    } else {
+        // Filename validation
+        if filename.is_empty() {
+            let _ = stream.write_all(b"501 Syntax error in parameters or arguments\r\n");
+            CommandResult::Continue
+        } else if filename.contains("..")
+            || filename.contains("/")
+            || filename.contains("\\")
+            || filename.contains(":")
+            || filename.contains("*")
+            || filename.contains("?")
+            || filename.contains("\"")
+            || filename.contains("<")
+            || filename.contains(">")
+            || filename.contains("|")
+        {
+            let _ = stream.write_all(b"550 Filename invalid\r\n");
+            CommandResult::Continue
+        } else if fs::metadata(&filename).is_ok() {
+            let _ = stream.write_all(b"550 File already exists\r\n");
+            CommandResult::Stor
+        } else {
+            match fs::File::create(filename) {
+                Ok(_) => {
+                    info!("File {} created successfully", filename);
+                    let _ = stream.write_all(b"226 Transfer complete\r\n");
+                    let _ = stream.flush();
+                    CommandResult::Stor
+                }
+                Err(e) => {
+                    error!("Failed to create file: {}", e);
+                    let _ = stream.write_all(b"550 Failed to create file\r\n");
+                    let _ = stream.flush();
+                    CommandResult::Continue
+                }
+            }
+        }
+    }
 }
