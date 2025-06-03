@@ -9,9 +9,10 @@ pub struct AuthState {
 
 impl AuthState {
     pub fn handle_user(&mut self, username: &str, stream: &mut TcpStream) {
+        //TODO: Replace with actual user validation logic
         if username == "user" {
             self.is_user_valid = true;
-            self.is_logged_in = false; // Reset login on new USER
+            self.is_logged_in = false;
 
             let _ = stream.write_all(b"331 Password required\r\n");
         } else {
@@ -24,6 +25,7 @@ impl AuthState {
 
     pub fn handle_pass(&mut self, password: &str, stream: &mut TcpStream) {
         if self.is_user_valid {
+            //TODO: Replace with actual password validation logic
             if password == "pass" {
                 self.is_logged_in = true;
                 let _ = stream.write_all(b"230 Login successful\r\n");
@@ -38,6 +40,11 @@ impl AuthState {
 
     pub fn is_logged_in(&self) -> bool {
         self.is_logged_in
+    }
+
+    pub fn logout(&mut self) {
+        self.is_logged_in = false;
+        self.is_user_valid = false;
     }
 
     // pub fn set_logged_in(&mut self, logged_in: bool) {

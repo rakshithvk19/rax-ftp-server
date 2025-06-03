@@ -10,9 +10,10 @@ use std::net::TcpStream;
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Quit,
+    List,
+    Logout,
     User(String),
     Pass(String),
-    List,
     Retr(String),
     Stor(String),
     Unknown(String),
@@ -34,9 +35,10 @@ pub fn parse_command(raw: &str) -> Command {
 
     match cmd.as_str() {
         "QUIT" | "Q" => Command::Quit,
+        "LIST" => Command::List,
+        "LOGOUT" => Command::Logout,
         "USER" => Command::User(arg.to_string()),
         "PASS" => Command::Pass(arg.to_string()),
-        "LIST" => Command::List,
         "RETR" => Command::Retr(arg.to_string()),
         "STOR" => Command::Stor(arg.to_string()),
         _ => Command::Unknown(trimmed.to_string()),
@@ -56,6 +58,7 @@ pub fn handle_command(
         Command::User(username) => handle_cmd_user(auth_state, username, stream),
         Command::Pass(password) => handle_cmd_pass(auth_state, password, stream),
         Command::List => handle_cmd_list(auth_state, stream),
+        Command::Logout => handle_cmd_logout(auth_state, stream),
         Command::Retr(filename) => handle_cmd_retr(auth_state, &filename, stream),
         Command::Stor(filename) => handle_cmd_stor(auth_state, &filename, stream),
         Command::Unknown(cmd) => handle_cmd_unknown(auth_state, stream, &cmd),
@@ -160,6 +163,16 @@ fn handle_cmd_list(auth_state: &mut AuthState, stream: &mut TcpStream) -> Comman
         }
         CommandResult::Continue
     }
+}
+
+fn handle_cmd_logout(auth_state: &mut AuthState, stream: &mut TcpStream) -> CommandResult {
+    if auth_state.is_logged_in() {
+        auth_state.logout();
+        let _ = stream.write_all(b"221 Logout successful\r\n");
+    } else {
+        let _ = stream.write_all(b"530 User Not logged in\r\n");
+    }
+    CommandResult::Continue
 }
 
 // Command handler for unknown commands
