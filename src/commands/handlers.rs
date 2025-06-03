@@ -23,6 +23,7 @@ pub fn handle_command(
         Command::User(username) => handle_cmd_user(auth_state, username, stream),
         Command::Pass(password) => handle_cmd_pass(auth_state, password, stream),
         Command::List => handle_cmd_list(auth_state, stream),
+        Command::Pwd => handle_cmd_pwd(auth_state, stream),
         Command::Logout => handle_cmd_logout(auth_state, stream),
         Command::Retr(filename) => handle_cmd_retr(auth_state, &filename, stream),
         Command::Stor(filename) => handle_cmd_stor(auth_state, &filename, stream),
@@ -167,7 +168,6 @@ fn handle_cmd_stor(
         let _ = stream.write_all(b"530 Not logged in\r\n");
         CommandResult::Continue
     } else {
-
         //TODO: Write better filename validation
         // Filename validation
         if filename.is_empty() {
@@ -208,6 +208,8 @@ fn handle_cmd_stor(
     }
 }
 
+// Command handler for CWD (Change Working Directory)
+//TODO: Improve error handling and path validation
 fn handle_cmd_cwd(auth_state: &AuthState, path: &String, stream: &mut TcpStream) -> CommandResult {
     if !auth_state.is_logged_in() {
         let _ = stream.write_all(b"530 Not logged in\r\n");
@@ -221,6 +223,26 @@ fn handle_cmd_cwd(auth_state: &AuthState, path: &String, stream: &mut TcpStream)
             Err(e) => {
                 error!("Failed to change directory: {}", e);
                 let _ = stream.write_all(b"550 Failed to change directory\r\n");
+                CommandResult::Continue
+            }
+        }
+    }
+}
+
+fn handle_cmd_pwd(auth_state: &AuthState, stream: &mut TcpStream) -> CommandResult {
+    if !auth_state.is_logged_in() {
+        let _ = stream.write_all(b"530 Not logged in\r\n");
+        CommandResult::Continue
+    } else {
+        match env::current_dir() {
+            Ok(path) => {
+                let response = format!("257 \"{}\"\r\n", path.display());
+                let _ = stream.write_all(response.as_bytes());
+                CommandResult::Continue
+            }
+            Err(e) => {
+                error!("Failed to get current directory: {}", e);
+                let _ = stream.write_all(b"550 Failed to get current directory\r\n");
                 CommandResult::Continue
             }
         }
