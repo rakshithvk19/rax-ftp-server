@@ -3,6 +3,7 @@ use crate::commands::parser::{Command, CommandResult};
 use crate::server::ServerState;
 
 use log::{error, info};
+use std::env;
 use std::fs;
 use std::io::Write;
 use std::net::TcpStream;
@@ -25,6 +26,7 @@ pub fn handle_command(
         Command::Logout => handle_cmd_logout(auth_state, stream),
         Command::Retr(filename) => handle_cmd_retr(auth_state, &filename, stream),
         Command::Stor(filename) => handle_cmd_stor(auth_state, &filename, stream),
+        Command::Cwd(path) => handle_cmd_cwd(auth_state, &path, stream),
         Command::Unknown(cmd) => handle_cmd_unknown(auth_state, stream, &cmd),
     }
 }
@@ -165,6 +167,8 @@ fn handle_cmd_stor(
         let _ = stream.write_all(b"530 Not logged in\r\n");
         CommandResult::Continue
     } else {
+
+        //TODO: Write better filename validation
         // Filename validation
         if filename.is_empty() {
             let _ = stream.write_all(b"501 Syntax error in parameters or arguments\r\n");
@@ -199,6 +203,25 @@ fn handle_cmd_stor(
                     let _ = stream.flush();
                     CommandResult::Continue
                 }
+            }
+        }
+    }
+}
+
+fn handle_cmd_cwd(auth_state: &AuthState, path: &String, stream: &mut TcpStream) -> CommandResult {
+    if !auth_state.is_logged_in() {
+        let _ = stream.write_all(b"530 Not logged in\r\n");
+        CommandResult::Continue
+    } else {
+        match env::set_current_dir(path) {
+            Ok(_) => {
+                let _ = stream.write_all(b"250 Directory changed successfully\r\n");
+                CommandResult::Continue
+            }
+            Err(e) => {
+                error!("Failed to change directory: {}", e);
+                let _ = stream.write_all(b"550 Failed to change directory\r\n");
+                CommandResult::Continue
             }
         }
     }
