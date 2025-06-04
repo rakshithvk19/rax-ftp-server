@@ -40,3 +40,64 @@ pub fn parse_command(raw: &str) -> Command {
         _ => Command::Unknown(trimmed.to_string()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_basic_commands() {
+        assert_eq!(parse_command("QUIT"), Command::Quit);
+        assert_eq!(parse_command("Q"), Command::Quit);
+        assert_eq!(parse_command("LIST"), Command::List);
+        assert_eq!(parse_command("LOGOUT"), Command::Logout);
+        assert_eq!(parse_command("PWD"), Command::Pwd);
+    }
+
+    #[test]
+    fn test_parse_commands_with_args() {
+        assert_eq!(
+            parse_command("CWD /some/path"),
+            Command::Cwd("/some/path".to_string())
+        );
+        assert_eq!(
+            parse_command("USER username"),
+            Command::User("username".to_string())
+        );
+        assert_eq!(
+            parse_command("PASS secret"),
+            Command::Pass("secret".to_string())
+        );
+        assert_eq!(
+            parse_command("RETR file.txt"),
+            Command::Retr("file.txt".to_string())
+        );
+        assert_eq!(
+            parse_command("STOR upload.txt"),
+            Command::Stor("upload.txt".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_with_whitespace() {
+        assert_eq!(parse_command("  QUIT  "), Command::Quit);
+        assert_eq!(parse_command("LIST    "), Command::List);
+        assert_eq!(
+            parse_command("USER  john  "),
+            Command::User("john".to_string())
+        );
+    }
+
+    #[test]
+    fn test_unknown_commands() {
+        assert_eq!(
+            parse_command("INVALID"),
+            Command::Unknown("INVALID".to_string())
+        );
+        assert_eq!(
+            parse_command("FOO bar"),
+            Command::Unknown("FOO bar".to_string())
+        );
+        assert_eq!(parse_command(""), Command::Unknown("".to_string()));
+    }
+}

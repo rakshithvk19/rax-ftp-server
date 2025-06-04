@@ -248,3 +248,125 @@ fn handle_cmd_pwd(auth_state: &AuthState, stream: &mut TcpStream) -> CommandResu
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::ServerState;
+    use std::net::TcpListener;
+
+    fn setup() -> (ServerState, TcpStream, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let client = TcpStream::connect(addr).unwrap();
+        let (server, _) = listener.accept().unwrap();
+
+        let mut state = ServerState::new();
+        (state, client, server)
+    }
+
+    #[test]
+    fn test_handle_quit() {
+        let (mut state, _client, mut server) = setup();
+        let result = handle_command(&mut state, Command::Quit, &mut server);
+        assert_eq!(result, CommandResult::Quit);
+    }
+
+    #[test]
+    fn test_handle_user() {
+        let (mut state, _client, mut server) = setup();
+        let result = handle_command(&mut state, Command::User("test".to_string()), &mut server);
+        assert_eq!(result, CommandResult::Continue);
+        assert!(!state.get_auth().is_logged_in());
+    }
+
+    #[test]
+    fn test_handle_pass() {
+        let (mut state, _client, mut server) = setup();
+
+        // First set username
+        handle_command(&mut state, Command::User("test".to_string()), &mut server);
+
+        // Then try password
+        let result = handle_command(&mut state, Command::Pass("pass".to_string()), &mut server);
+        assert_eq!(result, CommandResult::Continue);
+    }
+
+    #[test]
+    fn test_handle_list_unauthorized() {
+        let (mut state, _client, mut server) = setup();
+        let result = handle_command(&mut state, Command::List, &mut server);
+        assert_eq!(result, CommandResult::Continue);
+    }
+
+    #[test]
+    fn test_handle_pwd_unauthorized() {
+        let (mut state, _client, mut server) = setup();
+        let result = handle_command(&mut state, Command::Pwd, &mut server);
+        assert_eq!(result, CommandResult::Continue);
+    }
+
+    #[test]
+    fn test_handle_retr_unauthorized() {
+        let (mut state, _client, mut server) = setup();
+        let result = handle_command(
+            &mut state,
+            Command::Retr("test.txt".to_string()),
+            &mut server,
+        );
+        assert_eq!(result, CommandResult::Continue);
+    }
+
+    #[test]
+    fn test_handle_stor_unauthorized() {
+        let (mut state, _client, mut server) = setup();
+        let result = handle_command(
+            &mut state,
+            Command::Stor("test.txt".to_string()),
+            &mut server,
+        );
+        assert_eq!(result, CommandResult::Continue);
+    }
+
+    #[test]
+    fn test_handle_cwd_unauthorized() {
+        let (mut state, _client, mut server) = setup();
+        let result = handle_command(&mut state, Command::Cwd(".".to_string()), &mut server);
+        assert_eq!(result, CommandResult::Continue);
+    }
+
+    #[test]
+    fn test_handle_stor_invalid_filename() {
+        let (mut state, _client, mut server) = setup();
+        // state.get_auth().login();
+
+        let result = handle_command(
+            &mut state,
+            Command::Stor("../test.txt".to_string()),
+            &mut server,
+        );
+        assert_eq!(result, CommandResult::Continue);
+    }
+
+    #[test]
+    fn test_handle_unknown() {
+        let (mut state, _client, mut server) = setup();
+        let result = handle_command(
+            &mut state,
+            Command::Unknown("invalid".to_string()),
+            &mut server,
+        );
+        assert_eq!(result, CommandResult::Continue);
+    }
+
+    #[test]
+    fn test_handle_logout() {
+        let (mut state, _client, mut server) = setup();
+        // state.get_auth().login();
+
+        let result = handle_command(&mut state, Command::Logout, &mut server);
+        assert_eq!(result, CommandResult::Continue);
+        assert!(!state.get_auth().is_logged_in());
+    }
+}
