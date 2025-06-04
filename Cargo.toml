@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 env_logger = "0.11.8"
 log = "0.4.27"
+
+[dev-dependencies]
+rax-ftp-server = { path = "." }
