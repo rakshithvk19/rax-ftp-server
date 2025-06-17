@@ -3,8 +3,8 @@
 ## Project Setup and Basic Commands
 1. Set up Rust project with `cargo`, add dependencies (`log`, `env_logger`).
 2. Implement TCP server in `main.rs` using `TcpListener`.
-3. Create modular structure: `server.rs` (client handling), `commands.rs` (command parsing), `auth.rs` (authentication).
-4. Implement `USER`, `PASS`, `QUIT` commands with basic auth (`auth.rs`).
+3. Create modular structure: `server.rs` (client handling), `commands.rs` (command parsing), `client.rs` (client authentication).
+4. Implement `USER`, `PASS`, `QUIT` commands with basic client auth (`client.rs`).
 5. Send FTP responses (`220`, `230`, `331`, `221`).
 
 ## File Commands and Regression Fixes

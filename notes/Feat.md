@@ -1,4 +1,4 @@
-1. user auth feature
+1. user client auth feature
     - implement username/password authentication
     - create user database/storage
     - add session management
