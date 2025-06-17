@@ -1,10 +1,18 @@
-use log::info;
-use std::io;
+use env_logger;
+use log::{error, info};
 
-use rax_ftp_server::start_server;
+use rax_ftp_server::Server;
 
-fn main() -> io::Result<()> {
+fn main() {
     env_logger::init();
-    info!("Initializing FTP server");
-    start_server("127.0.0.1:2121")
+
+    info!("Starting Rax FTP Server...");
+    let server = Server::new();
+
+    if let Err(e) = std::panic::catch_unwind(|| server.start()) {
+        error!("Rax FTP Server crashed: {:?}", e);
+        std::process::exit(1);
+    } else {
+        info!("Rax FTP Server shutdown gracefully");
+    }
 }

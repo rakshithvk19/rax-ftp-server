@@ -1,5 +1,5 @@
-pub mod auth;
-pub mod commands;
+pub mod client;
 pub mod server;
+pub mod commands;
 
-pub use server::start_server;
+pub use server::Server;

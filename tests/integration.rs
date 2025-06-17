@@ -5,7 +5,7 @@ use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
-use rax_ftp_server::start_server;
+use rax_ftp_server::Server;
 
 // Helper to connect to the server
 fn connect() -> TcpStream {
@@ -54,7 +54,7 @@ fn cleanup_test_env() {
 // Start server in a separate thread
 fn start_test_server() {
     thread::spawn(|| {
-        start_server("127.0.0.1:2121").unwrap();
+        let server = Server::new();
     });
     // Wait for server to start
     thread::sleep(Duration::from_millis(200));

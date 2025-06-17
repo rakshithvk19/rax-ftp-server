@@ -11,6 +11,7 @@ pub enum Command {
     Retr(String),
     Stor(String),
     Unknown(String),
+    PASV(),
 }
 
 #[derive(Debug, PartialEq)]
@@ -18,6 +19,7 @@ pub enum CommandResult {
     Quit,
     Continue,
     Stor,
+    CONNECT,
 }
 
 // Parse raw command string into Command enum
@@ -37,6 +39,7 @@ pub fn parse_command(raw: &str) -> Command {
         "PASS" => Command::Pass(arg.to_string()),
         "RETR" => Command::Retr(arg.to_string()),
         "STOR" => Command::Stor(arg.to_string()),
+        "PASV" => Command::PASV(),
         _ => Command::Unknown(trimmed.to_string()),
     }
 }
