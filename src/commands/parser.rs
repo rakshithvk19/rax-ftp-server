@@ -18,8 +18,10 @@ pub enum Command {
 pub enum CommandResult {
     Quit,
     Continue,
-    Stor,
     CONNECT,
+    Stor(String), 
+    Retr(String), 
+    List, 
 }
 
 // Parse raw command string into Command enum

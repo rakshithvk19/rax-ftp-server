@@ -6,6 +6,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use std::fs::File;
 
 use crate::client::Client;
 use crate::commands::*;
@@ -70,7 +71,7 @@ pub fn handle_client(
     loop {
         match cmd_stream.read(&mut buffer) {
             Ok(0) => {
-                info!("Connection closed by client");
+                info!("Connection closed by client {}", client_addr);
                 break;
             }
             Ok(n) => {
@@ -82,7 +83,6 @@ pub fn handle_client(
 
                     let command_result = {
                         let mut clients_guard = clients.lock().unwrap();
-
                         if let Some(client) = clients_guard.get_mut(&client_addr) {
                             handle_command(client, command, &mut cmd_stream)
                         } else {
@@ -102,27 +102,147 @@ pub fn handle_client(
                         CommandResult::Continue => {
                             continue;
                         }
-                        CommandResult::Stor => {
-                            info!("Client {} requested to store data", client_addr);
-
-                            // Handle data transfer in the same thread
-                            if let Some(data_stream) =
-                                accept_data_connection(&clients, &client_addr)
+                        CommandResult::CONNECT => {
+                            info!("Initializing data channel for Client {}", client_addr);
+                            setup_data_channel(&clients, &client_addr, &mut cmd_stream);
+                        }
+                        CommandResult::Stor(filename) => {
+                            info!(
+                                "Client {} requested to store data for {}",
+                                client_addr, filename
+                            );
+                            if let Some(mut data_stream) = setup_data_stream(&clients, &client_addr)
                             {
-                                let _ = cmd_stream.write_all(b"150 Opening data connection\r\n");
-                                let _ = cmd_stream.flush();
-
-                                // Perform the actual data transfer here
-                                handle_data_transfer(data_stream, &client_addr);
-
-                                let _ = cmd_stream.write_all(b"226 Transfer complete\r\n");
+                                match File::create(&filename) {
+                                    Ok(mut file) => {
+                                        let mut buffer = [0; 1024];
+                                        loop {
+                                            match data_stream.read(&mut buffer) {
+                                                Ok(0) => break, // End of data
+                                                Ok(n) => {
+                                                    if let Err(e) = file.write_all(&buffer[..n]) {
+                                                        error!(
+                                                            "Failed to write to file {}: {}",
+                                                            filename, e
+                                                        );
+                                                        let _ = cmd_stream.write_all(
+                                                            b"550 Requested action not taken\r\n",
+                                                        );
+                                                        break;
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    error!(
+                                                        "Failed to read from data stream: {}",
+                                                        e
+                                                    );
+                                                    let _ = cmd_stream.write_all(b"426 Connection closed; transfer aborted\r\n");
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        if file.flush().is_ok() {
+                                            let _ =
+                                                cmd_stream.write_all(b"226 Transfer complete\r\n");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to create file {}: {}", filename, e);
+                                        let _ = cmd_stream
+                                            .write_all(b"550 Requested action not taken\r\n");
+                                    }
+                                }
                             } else {
                                 let _ = cmd_stream.write_all(b"425 Can't open data connection\r\n");
                             }
                         }
-                        CommandResult::CONNECT => {
-                            info!("Initializing data channel for Client {}", client_addr);
-                            setup_data_channel(&clients, &client_addr, &mut cmd_stream);
+                        CommandResult::Retr(filename) => {
+                            info!(
+                                "Client {} requested to retrieve data for {}",
+                                client_addr, filename
+                            );
+                            if let Some(mut data_stream) = setup_data_stream(&clients, &client_addr)
+                            {
+                                match File::open(&filename) {
+                                    Ok(mut file) => {
+                                        let mut buffer = [0; 1024];
+                                        loop {
+                                            match file.read(&mut buffer) {
+                                                Ok(0) => break, // End of file
+                                                Ok(n) => {
+                                                    if let Err(e) =
+                                                        data_stream.write_all(&buffer[..n])
+                                                    {
+                                                        error!(
+                                                            "Failed to write to data stream: {}",
+                                                            e
+                                                        );
+                                                        let _ = cmd_stream.write_all(b"426 Connection closed; transfer aborted\r\n");
+                                                        break;
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    error!(
+                                                        "Failed to read from file {}: {}",
+                                                        filename, e
+                                                    );
+                                                    let _ = cmd_stream.write_all(
+                                                        b"451 Requested action aborted\r\n",
+                                                    );
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        if data_stream.flush().is_ok() {
+                                            let _ =
+                                                cmd_stream.write_all(b"226 Transfer complete\r\n");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to open file {}: {}", filename, e);
+                                        let _ =
+                                            cmd_stream.write_all(b"550 Failed to open file\r\n");
+                                    }
+                                }
+                            } else {
+                                let _ = cmd_stream.write_all(b"425 Can't open data connection\r\n");
+                            }
+                        }
+                        CommandResult::List => {
+                            info!("Client {} requested directory listing", client_addr);
+                            if let Some(mut data_stream) = setup_data_stream(&clients, &client_addr)
+                            {
+                                match std::fs::read_dir(".") {
+                                    Ok(entries) => {
+                                        let mut file_list = String::new();
+                                        for entry in entries {
+                                            if let Ok(entry) = entry {
+                                                file_list.push_str(&format!(
+                                                    "{}\r\n",
+                                                    entry.file_name().to_string_lossy()
+                                                ));
+                                            }
+                                        }
+                                        if let Err(e) = data_stream.write_all(file_list.as_bytes())
+                                        {
+                                            error!("Failed to write to data stream: {}", e);
+                                            let _ = cmd_stream.write_all(
+                                                b"426 Connection closed; transfer aborted\r\n",
+                                            );
+                                        } else if data_stream.flush().is_ok() {
+                                            let _ =
+                                                cmd_stream.write_all(b"226 Transfer complete\r\n");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to read directory: {}", e);
+                                        let _ = cmd_stream
+                                            .write_all(b"550 Failed to list directory\r\n");
+                                    }
+                                }
+                            } else {
+                                let _ = cmd_stream.write_all(b"425 Can't open data connection\r\n");
+                            }
                         }
                     }
                 }
@@ -171,11 +291,8 @@ fn setup_data_channel(
                             }
                         }
 
-                        let response = format!(
-                            "227 Entering Passive Mode (127.0.0.1.{}.{})\r\n",
-                            port >> 8,
-                            port & 0xFF
-                        );
+                        let response =
+                            format!("227 Entering Passive Mode (127.0.0.1::{})\r\n", port);
                         let _ = cmd_stream.write_all(response.as_bytes());
 
                         info!(
@@ -198,70 +315,57 @@ fn setup_data_channel(
     }
 }
 
-//Not needed
-fn accept_data_connection(
+// Function to accept data connection with timeout
+fn setup_data_stream(
     clients: &Arc<Mutex<HashMap<String, Client>>>,
     client_addr: &str,
 ) -> Option<TcpStream> {
-    let mut clients_guard = clients.lock().unwrap();
+    const ACCEPT_ATTEMPTS: u32 = 50;
+    const ACCEPT_SLEEP_MS: u32 = 100;
+    const ACCEPT_TIMEOUT_SECS: u64 = ((ACCEPT_ATTEMPTS * (ACCEPT_SLEEP_MS)) / 1000) as u64; // For logging
 
-    if let Some(client) = clients_guard.get_mut(client_addr) {
-        if let Some(listener) = client.take_data_listener() {
-            // Release the lock temporarily while waiting for connection
-            drop(clients_guard);
+    let listener = {
+        let mut clients_guard = clients.lock().unwrap();
+        if let Some(client) = clients_guard.get_mut(client_addr) {
+            client.take_data_listener()
+        } else {
+            None
+        }
+    };
 
-            // Try to accept connection with timeout
-            for _ in 0..50 {
-                // 5 second timeout (50 * 100ms)
-                match listener.accept() {
-                    Ok((data_stream, addr)) => {
-                        info!(
-                            "Data connection accepted from {} for client {}",
-                            addr, client_addr
-                        );
-                        return Some(data_stream);
-                    }
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(100));
-                    }
-                    Err(e) => {
-                        error!("Error accepting data connection: {}", e);
-                        return None;
-                    }
+    if let Some(listener) = listener {
+        // Try to accept connection with timeout
+        for _ in 0..ACCEPT_ATTEMPTS {
+            // Total timeout: ACCEPT_ATTEMPTS * ACCEPT_SLEEP_MS milliseconds
+            match listener.accept() {
+                Ok((data_stream, addr)) => {
+                    info!(
+                        "Data connection accepted from {} for client {}",
+                        addr, client_addr
+                    );
+                    return Some(data_stream);
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(ACCEPT_SLEEP_MS as u64));
+                }
+                Err(e) => {
+                    error!("Error accepting data connection: {}", e);
+                    break;
                 }
             }
-            error!("Timeout waiting for data connection from {}", client_addr);
+        }
+        error!(
+            "Timeout ({} seconds) waiting for data connection from {}",
+            ACCEPT_TIMEOUT_SECS, client_addr
+        );
 
-            // Put the listener back if we timed out
-            clients_guard = clients.lock().unwrap();
-            if let Some(client) = clients_guard.get_mut(client_addr) {
-                client.set_data_listener(Some(listener));
-            }
+        // Put the listener back if we timed out
+        let mut clients_guard = clients.lock().unwrap();
+        if let Some(client) = clients_guard.get_mut(client_addr) {
+            client.set_data_listener(Some(listener));
         }
     }
     None
-}
-
-fn handle_data_transfer(mut data_stream: TcpStream, client_addr: &str) {
-    info!("Handling data transfer for client {}", client_addr);
-
-    // Example: Echo received data back (replace with actual file transfer logic)
-    let mut buffer = [0; 8192];
-    match data_stream.read(&mut buffer) {
-        Ok(n) if n > 0 => {
-            info!("Received {} bytes from {}", n, client_addr);
-            // Process the data here (save to file, etc.)
-            let _ = data_stream.write_all(&buffer[..n]);
-        }
-        Ok(_) => {
-            info!("No data received from {}", client_addr);
-        }
-        Err(e) => {
-            error!("Error reading from data stream: {}", e);
-        }
-    }
-
-    let _ = data_stream.shutdown(std::net::Shutdown::Both);
 }
 
 fn find_available_port() -> Option<u16> {
