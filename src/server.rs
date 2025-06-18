@@ -1,12 +1,12 @@
 //server.rs
 use log::{error, info};
 use std::collections::HashMap;
+use std::fs::File;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use std::fs::File;
 
 use crate::client::Client;
 use crate::commands::*;
@@ -86,14 +86,14 @@ pub fn handle_client(
                         if let Some(client) = clients_guard.get_mut(&client_addr) {
                             handle_command(client, command, &mut cmd_stream)
                         } else {
-                            CommandResult::Quit
+                            CommandResult::QUIT
                         }
                     };
 
                     command_buffer.clear();
 
                     match command_result {
-                        CommandResult::Quit => {
+                        CommandResult::QUIT => {
                             info!("Client {} requested to quit", client_addr);
                             let _ = cmd_stream.write_all(b"221 Goodbye\r\n");
                             let _ = cmd_stream.shutdown(std::net::Shutdown::Both);
@@ -106,7 +106,7 @@ pub fn handle_client(
                             info!("Initializing data channel for Client {}", client_addr);
                             setup_data_channel(&clients, &client_addr, &mut cmd_stream);
                         }
-                        CommandResult::Stor(filename) => {
+                        CommandResult::STOR(filename) => {
                             info!(
                                 "Client {} requested to store data for {}",
                                 client_addr, filename
@@ -156,7 +156,7 @@ pub fn handle_client(
                                 let _ = cmd_stream.write_all(b"425 Can't open data connection\r\n");
                             }
                         }
-                        CommandResult::Retr(filename) => {
+                        CommandResult::RETR(filename) => {
                             info!(
                                 "Client {} requested to retrieve data for {}",
                                 client_addr, filename
@@ -208,7 +208,7 @@ pub fn handle_client(
                                 let _ = cmd_stream.write_all(b"425 Can't open data connection\r\n");
                             }
                         }
-                        CommandResult::List => {
+                        CommandResult::LIST => {
                             info!("Client {} requested directory listing", client_addr);
                             if let Some(mut data_stream) = setup_data_stream(&clients, &client_addr)
                             {

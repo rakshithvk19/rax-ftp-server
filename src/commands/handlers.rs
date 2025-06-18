@@ -18,16 +18,16 @@ pub fn handle_command(
     // let client = server.get_client();
 
     match command {
-        Command::Quit => handle_cmd_quit(client, stream),
-        Command::User(username) => handle_cmd_user(client, username, stream),
-        Command::Pass(password) => handle_cmd_pass(client, password, stream),
-        Command::List => handle_cmd_list(client, stream),
-        Command::Pwd => handle_cmd_pwd(client, stream),
-        Command::Logout => handle_cmd_logout(client, stream),
-        Command::Retr(filename) => handle_cmd_retr(client, &filename, stream),
-        Command::Stor(filename) => handle_cmd_stor(client, &filename, stream),
-        Command::Cwd(path) => handle_cmd_cwd(client, &path, stream),
-        Command::Unknown(cmd) => handle_cmd_unknown(client, stream, &cmd),
+        Command::QUIT => handle_cmd_quit(client, stream),
+        Command::USER(username) => handle_cmd_user(client, username, stream),
+        Command::PASS(password) => handle_cmd_pass(client, password, stream),
+        Command::LIST => handle_cmd_list(client, stream),
+        Command::PWD => handle_cmd_pwd(client, stream),
+        Command::LOGOUT => handle_cmd_logout(client, stream),
+        Command::RETR(filename) => handle_cmd_retr(client, &filename, stream),
+        Command::STOR(filename) => handle_cmd_stor(client, &filename, stream),
+        Command::CWD(path) => handle_cmd_cwd(client, &path, stream),
+        Command::UNKNOWN(cmd) => handle_cmd_unknown(client, stream, &cmd),
         Command::PASV() => handle_cmd_pasv(client, stream),
     }
 }
@@ -35,7 +35,7 @@ pub fn handle_command(
 // Command handler for QUIT
 fn handle_cmd_quit(_client: &mut Client, stream: &mut TcpStream) -> CommandResult {
     let _ = stream.write_all(b"221 Goodbye\r\n");
-    CommandResult::Quit
+    CommandResult::QUIT
 }
 
 // Command handler for PASS
@@ -62,7 +62,7 @@ fn handle_cmd_retr(
         return CommandResult::Continue;
     }
     let _ = stream.write_all(b"150 Opening data connection\r\n");
-    CommandResult::Retr(filename.clone())
+    CommandResult::RETR(filename.clone())
 }
 
 // Command handler for USER
@@ -81,7 +81,7 @@ fn handle_cmd_list(client: &mut Client, stream: &mut TcpStream) -> CommandResult
         return CommandResult::Continue;
     }
     let _ = stream.write_all(b"150 Opening data connection\r\n");
-    CommandResult::List
+    CommandResult::LIST
 }
 
 fn handle_cmd_logout(client: &mut Client, stream: &mut TcpStream) -> CommandResult {
@@ -142,7 +142,7 @@ fn handle_cmd_stor(
         return CommandResult::Continue;
     }
     let _ = stream.write_all(b"150 Opening data connection\r\n");
-    CommandResult::Stor(filename.clone())
+    CommandResult::STOR(filename.clone())
 }
 // Command handler for CWD (Change Working Directory)
 //TODO: Improve error handling and path validation
