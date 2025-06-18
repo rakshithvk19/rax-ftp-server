@@ -1,7 +1,7 @@
 //client.rs
 
 use std::io::Write;
-use std::net::{TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 
 #[derive(Default)]
 pub struct Client {
@@ -10,6 +10,7 @@ pub struct Client {
     is_data_channel_init: bool,
     data_listener: Option<TcpListener>,
     data_port: Option<u16>,
+    data_socket: Option<SocketAddr>,
 }
 
 impl Client {
@@ -48,6 +49,7 @@ impl Client {
         self.is_user_valid = false;
         self.data_listener = None;
         self.data_port = None;
+        self.data_socket = None;
         self.is_data_channel_init = false;
     }
 
@@ -72,6 +74,10 @@ impl Client {
         self.data_port
     }
 
+    pub fn data_socket(&self) -> Option<SocketAddr> {
+        self.data_socket
+    }
+
     // Setters
     pub fn set_user_valid(&mut self, valid: bool) {
         self.is_user_valid = valid;
@@ -91,6 +97,10 @@ impl Client {
 
     pub fn set_data_port(&mut self, port: Option<u16>) {
         self.data_port = port;
+    }
+
+    pub fn set_data_socket(&mut self, socket: Option<SocketAddr>) {
+        self.data_socket = socket;
     }
 
     // Mutable getter for data_listener to allow taking ownership

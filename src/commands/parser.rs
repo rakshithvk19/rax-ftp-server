@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 // Command enum to represent FTP commands
 #[derive(Debug, PartialEq)]
 pub enum Command {
@@ -10,15 +12,16 @@ pub enum Command {
     PASS(String),
     RETR(String),
     STOR(String),
-    UNKNOWN(String),
+    PORT(String),
     PASV(),
+    UNKNOWN(String),
 }
 
 #[derive(Debug, PartialEq)]
 pub enum CommandResult {
     QUIT,
-    Continue,
-    CONNECT,
+    CONTINUE,
+    CONNECT(Option<SocketAddr>),
     STOR(String),
     RETR(String),
     LIST,
@@ -41,6 +44,7 @@ pub fn parse_command(raw: &str) -> Command {
         "PASS" => Command::PASS(arg.to_string()),
         "RETR" => Command::RETR(arg.to_string()),
         "STOR" => Command::STOR(arg.to_string()),
+        "PORT" => Command::PORT(arg.to_string()),
         "PASV" => Command::PASV(),
         _ => Command::UNKNOWN(trimmed.to_string()),
     }

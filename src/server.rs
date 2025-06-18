@@ -99,12 +99,57 @@ pub fn handle_client(
                             let _ = cmd_stream.shutdown(std::net::Shutdown::Both);
                             break;
                         }
-                        CommandResult::Continue => {
+                        CommandResult::CONTINUE => {
                             continue;
                         }
-                        CommandResult::CONNECT => {
+                        CommandResult::CONNECT(socket_address) => {
+                            match socket_address {
+                                Some(addr) => {
+                                    //Bind socket to TCP listener + set listener to non-blocking mode
+                                    match TcpListener::bind(addr) {
+                                        Ok(listener) => {
+                                            //Set TcpListener to Non-Blocking mode
+                                            if listener.set_nonblocking(true).is_ok() {
+                                                let mut clients_guard = clients.lock().unwrap();
+
+                                                //Updating listener and subsequent data in client
+                                                if let Some(client) =
+                                                    clients_guard.get_mut(&client_addr)
+                                                {
+                                                    client.set_data_listener(Some(listener));
+                                                    client.set_data_channel_init(true);
+                                                }
+
+                                                let _ = cmd_stream
+                                                    .write_all(b"200 PORT command successful\r\n");
+
+                                                let response = format!(
+                                                    "227 Entering Active Mode ({})\r\n",
+                                                    &addr
+                                                );
+                                                let _ = cmd_stream.write_all(response.as_bytes());
+
+                                                info!(
+                                                    "Data channel ready on {} for client {}",
+                                                    &addr, client_addr
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            let _= cmd_stream.write_all(b"500 Unexpected error while establishing connection with server. Try using a different port.");
+                                            error!(
+                                                "Error binding socket {} to listener. Error: {}",
+                                                &addr, e
+                                            );
+                                            continue;
+                                        }
+                                    }
+                                }
+                                None => {
+                                    setup_data_channel(&clients, &client_addr, &mut cmd_stream);
+                                }
+                            }
                             info!("Initializing data channel for Client {}", client_addr);
-                            setup_data_channel(&clients, &client_addr, &mut cmd_stream);
                         }
                         CommandResult::STOR(filename) => {
                             info!(
@@ -292,7 +337,7 @@ fn setup_data_channel(
                         }
 
                         let response =
-                            format!("227 Entering Passive Mode (127.0.0.1::{})\r\n", port);
+                            format!("227 Entering Passive Mode (127.0.0.1:{})\r\n", port);
                         let _ = cmd_stream.write_all(response.as_bytes());
 
                         info!(
@@ -320,6 +365,7 @@ fn setup_data_stream(
     clients: &Arc<Mutex<HashMap<String, Client>>>,
     client_addr: &str,
 ) -> Option<TcpStream> {
+    // Passive mode
     const ACCEPT_ATTEMPTS: u32 = 50;
     const ACCEPT_SLEEP_MS: u32 = 100;
     const ACCEPT_TIMEOUT_SECS: u64 = ((ACCEPT_ATTEMPTS * (ACCEPT_SLEEP_MS)) / 1000) as u64; // For logging
