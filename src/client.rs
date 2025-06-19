@@ -1,7 +1,4 @@
-//client.rs
-
-use std::io::Write;
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener};
 
 #[derive(Default)]
 pub struct Client {
@@ -11,42 +8,14 @@ pub struct Client {
     data_listener: Option<TcpListener>,
     data_port: Option<u16>,
     data_socket: Option<SocketAddr>,
+    username: Option<String>, 
 }
 
 impl Client {
-    pub fn handle_user(&mut self, username: &str, stream: &mut TcpStream) {
-        //TODO: Replace with actual user validation logic
-        if username == "user" {
-            self.is_user_valid = true;
-            self.is_logged_in = false;
-
-            let _ = stream.write_all(b"331 Password required\r\n");
-        } else {
-            self.is_user_valid = false;
-            self.is_logged_in = false;
-
-            let _ = stream.write_all(b"530 Invalid username\r\n");
-        }
-    }
-
-    pub fn handle_pass(&mut self, password: &str, stream: &mut TcpStream) {
-        if self.is_user_valid {
-            //TODO: Replace with actual password validation logic
-            if password == "pass" {
-                self.is_logged_in = true;
-                let _ = stream.write_all(b"230 Login successful\r\n");
-            } else {
-                self.is_logged_in = false;
-                let _ = stream.write_all(b"530 Invalid password\r\n");
-            }
-        } else {
-            let _ = stream.write_all(b"530 Please enter the username first\r\n");
-        }
-    }
-
     pub fn logout(&mut self) {
-        self.is_logged_in = false;
         self.is_user_valid = false;
+        self.is_logged_in = false;
+        self.username = None;
         self.data_listener = None;
         self.data_port = None;
         self.data_socket = None;
@@ -78,6 +47,10 @@ impl Client {
         self.data_socket
     }
 
+    pub fn username(&self) -> Option<&String> {
+        self.username.as_ref()
+    }
+
     // Setters
     pub fn set_user_valid(&mut self, valid: bool) {
         self.is_user_valid = valid;
@@ -103,7 +76,10 @@ impl Client {
         self.data_socket = socket;
     }
 
-    // Mutable getter for data_listener to allow taking ownership
+    pub fn set_username(&mut self, username: Option<String>) {
+        self.username = username;
+    }
+
     pub fn take_data_listener(&mut self) -> Option<TcpListener> {
         self.data_listener.take()
     }

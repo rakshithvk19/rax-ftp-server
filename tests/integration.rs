@@ -54,7 +54,7 @@ fn cleanup_test_env() {
 // Start server in a separate thread
 fn start_test_server() {
     thread::spawn(|| {
-        let server = Server::new();
+        let _server = Server::new();
     });
     // Wait for server to start
     thread::sleep(Duration::from_millis(200));

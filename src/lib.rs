@@ -1,5 +1,6 @@
+pub mod auth;
 pub mod client;
-pub mod server;
 pub mod commands;
+pub mod server;
 
 pub use server::Server;

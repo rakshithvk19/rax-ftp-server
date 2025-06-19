@@ -1,3 +1,4 @@
+use crate::auth;
 use crate::client::Client;
 use crate::commands::parser::{Command, CommandResult};
 
@@ -40,12 +41,6 @@ fn handle_cmd_quit(_client: &mut Client, stream: &mut TcpStream) -> CommandResul
     CommandResult::QUIT
 }
 
-// Command handler for PASS
-fn handle_cmd_pass(client: &mut Client, password: String, stream: &mut TcpStream) -> CommandResult {
-    client.handle_pass(&password, stream);
-    CommandResult::CONTINUE
-}
-
 fn handle_cmd_retr(
     client: &mut Client,
     filename: &String,
@@ -69,7 +64,45 @@ fn handle_cmd_retr(
 
 // Command handler for USER
 fn handle_cmd_user(client: &mut Client, username: String, stream: &mut TcpStream) -> CommandResult {
-    client.handle_user(&username, stream);
+    match auth::validate_user(&username) {
+        Ok(response) => {
+            let _ = stream.write_all(response.as_bytes());
+            client.set_user_valid(true);
+            client.set_logged_in(false);
+            client.set_username(Some(username));
+        }
+        Err(e) => {
+            let response = format!("{} {}\r\n", e.ftp_response(), e.message());
+            let _ = stream.write_all(response.as_bytes());
+            client.set_user_valid(false);
+            client.set_logged_in(false);
+            client.set_username(None);
+        }
+    }
+    CommandResult::CONTINUE
+}
+
+// Command handler for PASS
+fn handle_cmd_pass(client: &mut Client, password: String, stream: &mut TcpStream) -> CommandResult {
+    if client.is_user_valid() {
+        if let Some(username) = &client.username() {
+            match auth::validate_password(username, &password) {
+                Ok(response) => {
+                    let _ = stream.write_all(response.as_bytes());
+                    client.set_logged_in(true);
+                }
+                Err(e) => {
+                    let response = format!("{} {}\r\n", e.ftp_response(), e.message());
+                    let _ = stream.write_all(response.as_bytes());
+                    client.set_logged_in(false);
+                }
+            }
+        } else {
+            let _ = stream.write_all(b"530 Please enter the username first\r\n");
+        }
+    } else {
+        let _ = stream.write_all(b"530 Please enter the username first\r\n");
+    }
     CommandResult::CONTINUE
 }
 
@@ -202,11 +235,6 @@ fn handle_cmd_port(client: &mut Client, addr: &String, stream: &mut TcpStream) -
         return CommandResult::CONTINUE;
     }
 
-    // if !client.is_data_channel_init() {
-    //     let _ = stream.write_all(b"530 Data channel not initialized\r\n");
-    //     return CommandResult::CONTINUE;
-    // }
-
     //Parse port into socket
     match SocketAddr::from_str(addr) {
         Ok(socket_address) => {
@@ -219,7 +247,7 @@ fn handle_cmd_port(client: &mut Client, addr: &String, stream: &mut TcpStream) -
             }
         }
         //TODO: Handle addr parse error
-        Err(e) => {
+        Err(_e) => {
             let _ = stream.write_all(
                 b"501 Invalid port. Enter the port in the following format -> ip::port. Current error \r\n",
             );
