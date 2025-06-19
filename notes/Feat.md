@@ -23,7 +23,7 @@ BUGS
 5. user can be changed when session is going on -- fatal bug 
 
 src/
-├── auth.rs
+├── auth.rs -- done
 ├── client/
 │   ├── client_state.rs
 │   ├── client_connection.rs
