@@ -1,7 +1,7 @@
 use log::{error, info};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
 
 use crate::client::Client;
@@ -11,8 +11,8 @@ use crate::file_transfer;
 
 pub fn handle_client(
     mut cmd_stream: TcpStream,
-    clients: Arc<Mutex<HashMap<String, Client>>>,
-    client_addr: String,
+    clients: Arc<Mutex<HashMap<SocketAddr, Client>>>,
+    client_addr: SocketAddr,
 ) {
     if let Err(e) = cmd_stream.write_all(b"220 Welcome to the Rax FTP server\r\n") {
         error!("Failed to send welcome: {}", e);
@@ -62,8 +62,8 @@ pub fn handle_client(
 }
 
 fn process_command(
-    clients: &Arc<Mutex<HashMap<String, Client>>>,
-    client_addr: &str,
+    clients: &Arc<Mutex<HashMap<SocketAddr, Client>>>,
+    client_addr: &SocketAddr,
     command: Command,
     cmd_stream: &mut TcpStream,
 ) -> CommandResult {

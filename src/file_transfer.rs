@@ -2,7 +2,7 @@ use log::{error, info};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
 
 use crate::client::Client;
@@ -10,8 +10,8 @@ use crate::commands::CommandResult;
 use crate::data_channel;
 
 pub fn handle_stor_command(
-    clients: &Arc<Mutex<HashMap<String, Client>>>,
-    client_addr: &str,
+    clients: &Arc<Mutex<HashMap<SocketAddr, Client>>>,
+    client_addr: &SocketAddr,
     filename: &str,
     cmd_stream: &mut TcpStream,
 ) -> CommandResult {
@@ -57,8 +57,8 @@ pub fn handle_stor_command(
 }
 
 pub fn handle_retr_command(
-    clients: &Arc<Mutex<HashMap<String, Client>>>,
-    client_addr: &str,
+    clients: &Arc<Mutex<HashMap<SocketAddr, Client>>>,
+    client_addr: &SocketAddr,
     filename: &str,
     cmd_stream: &mut TcpStream,
 ) -> CommandResult {
@@ -104,8 +104,8 @@ pub fn handle_retr_command(
 }
 
 pub fn handle_list_command(
-    clients: &Arc<Mutex<HashMap<String, Client>>>,
-    client_addr: &str,
+    clients: &Arc<Mutex<HashMap<SocketAddr, Client>>>,
+    client_addr: &SocketAddr,
     cmd_stream: &mut TcpStream,
 ) -> CommandResult {
     info!("Client {} requested directory listing", client_addr);
