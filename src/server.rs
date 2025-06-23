@@ -51,8 +51,6 @@ impl Server {
         for cmd_stream in listener.incoming() {
             match cmd_stream {
                 Ok(mut cmd_stream) => {
-                    // let client_addr = cmd_stream.peer_addr().unwrap().to_string();
-
                     let client_addr = match cmd_stream.peer_addr() {
                         Ok(addr) => addr,
                         Err(e) => {

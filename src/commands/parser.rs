@@ -17,14 +17,22 @@ pub enum Command {
     UNKNOWN(String),
 }
 
-#[derive(Debug, PartialEq)]
-pub enum CommandResult {
-    QUIT,
-    CONTINUE,
-    CONNECT(Option<SocketAddr>),
-    STOR(String),
-    RETR(String),
-    LIST,
+pub enum CommandStatus {
+    Success,
+    Failure(String),
+    CloseConnection,
+}
+
+pub enum CommandData {
+    Connect(SocketAddr),
+    File(String),
+    DirectoryListing(Vec<String>),
+}
+
+pub struct CommandResult {
+    pub status: CommandStatus,
+    pub message: Option<String>,
+    pub data: Option<CommandData>,
 }
 
 // Parse raw command string into Command enum
