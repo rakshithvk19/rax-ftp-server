@@ -1,4 +1,3 @@
-use std::net::SocketAddr;
 
 // Command enum to represent FTP commands
 #[derive(Debug, PartialEq)]
@@ -24,8 +23,6 @@ pub enum CommandStatus {
 }
 
 pub enum CommandData {
-    Connect(SocketAddr),
-    File(String),
     DirectoryListing(Vec<String>),
 }
 

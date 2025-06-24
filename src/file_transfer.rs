@@ -1,197 +1,109 @@
-use log::{error, info};
-use std::collections::HashMap;
+//file_transfer.rs
+
+use log::error;
 use std::fs::File;
 use std::io::{Read, Write};
-use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::net::TcpStream;
 
-use crate::client::Client;
-use crate::commands::{CommandResult, CommandStatus};
-use crate::data_channel;
+use crate::commands::CommandStatus;
 
-pub fn handle_stor_command(
-    clients: &Arc<Mutex<HashMap<SocketAddr, Client>>>,
-    client_addr: &SocketAddr,
+pub fn handle_file_upload(
+    mut data_stream: TcpStream,
     filename: &str,
-) -> CommandResult {
-    info!(
-        "Client {} requested to store data for {}",
-        client_addr, filename
-    );
-
-    if let Some(mut data_stream) = data_channel::setup_data_stream(clients, client_addr) {
-        match File::create(filename) {
-            Ok(mut file) => {
-                let mut buffer = [0; 1024];
-                loop {
-                    match data_stream.read(&mut buffer) {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            if let Err(e) = file.write_all(&buffer[..n]) {
-                                error!("Failed to write to file {}: {}", filename, e);
-                                return CommandResult {
-                                    status: CommandStatus::Failure(
-                                        "550 Requested action not taken\r\n".into(),
-                                    ),
-                                    message: Some("550 Requested action not taken\r\n".into()),
-                                    data: None,
-                                };
-                            }
+) -> Result<(CommandStatus, &'static str), (CommandStatus, &'static str)> {
+    match File::create(filename) {
+        Ok(mut file) => {
+            let mut buffer = [0; 1024];
+            loop {
+                match data_stream.read(&mut buffer) {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        if let Err(e) = file.write_all(&buffer[..n]) {
+                            error!("Failed to write to file {}: {}", filename, e);
+                            return Err((
+                                CommandStatus::Failure("550 Requested action not taken\r\n".into()),
+                                "550 Requested action not taken\r\n",
+                            ));
                         }
-                        Err(e) => {
-                            error!("Failed to read from data stream: {}", e);
-                            return CommandResult {
-                                status: CommandStatus::Failure(
+                    }
+                    Err(e) => {
+                        error!("Failed to read from data stream: {}", e);
+                        return Err((
+                            CommandStatus::Failure(
+                                "426 Connection closed; transfer aborted\r\n".into(),
+                            ),
+                            "426 Connection closed; transfer aborted\r\n",
+                        ));
+                    }
+                }
+            }
+
+            if file.flush().is_ok() {
+                return Ok((CommandStatus::Success, "226 Transfer complete\r\n"));
+            } else {
+                return Err((
+                    CommandStatus::Failure("450 Requested file action not taken\r\n".into()),
+                    "450 Requested file action not taken\r\n",
+                ));
+            }
+        }
+        Err(e) => {
+            error!("Failed to create file {}: {}", filename, e);
+            return Err((
+                CommandStatus::Failure("550 Requested action not taken\r\n".into()),
+                "550 Requested action not taken\r\n",
+            ));
+        }
+    }
+}
+
+pub fn handle_file_download(
+    mut data_stream: TcpStream,
+    filename: &str,
+) -> Result<(CommandStatus, &'static str), (CommandStatus, &'static str)> {
+    match File::open(filename) {
+        Ok(mut file) => {
+            let mut buffer = [0; 1024];
+
+            loop {
+                match file.read(&mut buffer) {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        if let Err(e) = data_stream.write_all(&buffer[..n]) {
+                            error!("Failed to write to data stream: {}", e);
+                            return Err((
+                                CommandStatus::Failure(
                                     "426 Connection closed; transfer aborted\r\n".into(),
                                 ),
-                                message: Some("426 Connection closed; transfer aborted\r\n".into()),
-                                data: None,
-                            };
+                                "426 Connection closed; transfer aborted\r\n",
+                            ));
                         }
                     }
-                }
-
-                if file.flush().is_ok() {
-                    return CommandResult {
-                        status: CommandStatus::Success,
-                        message: Some("226 Transfer complete\r\n".into()),
-                        data: None,
-                    };
-                }
-            }
-            Err(e) => {
-                error!("Failed to create file {}: {}", filename, e);
-                return CommandResult {
-                    status: CommandStatus::Failure("550 Requested action not taken\r\n".into()),
-                    message: Some("550 Requested action not taken\r\n".into()),
-                    data: None,
-                };
-            }
-        }
-    }
-
-    CommandResult {
-        status: CommandStatus::Failure("425 Can't open data connection\r\n".into()),
-        message: Some("425 Can't open data connection\r\n".into()),
-        data: None,
-    }
-}
-
-pub fn handle_retr_command(
-    clients: &Arc<Mutex<HashMap<SocketAddr, Client>>>,
-    client_addr: &SocketAddr,
-    filename: &str,
-) -> CommandResult {
-    info!(
-        "Client {} requested to retrieve data for {}",
-        client_addr, filename
-    );
-
-    if let Some(mut data_stream) = data_channel::setup_data_stream(clients, client_addr) {
-        match File::open(filename) {
-            Ok(mut file) => {
-                let mut buffer = [0; 1024];
-                loop {
-                    match file.read(&mut buffer) {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            if let Err(e) = data_stream.write_all(&buffer[..n]) {
-                                error!("Failed to write to data stream: {}", e);
-                                return CommandResult {
-                                    status: CommandStatus::Failure(
-                                        "426 Connection closed; transfer aborted\r\n".into(),
-                                    ),
-                                    message: Some(
-                                        "426 Connection closed; transfer aborted\r\n".into(),
-                                    ),
-                                    data: None,
-                                };
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to read from file {}: {}", filename, e);
-                            return CommandResult {
-                                status: CommandStatus::Failure(
-                                    "451 Requested action aborted\r\n".into(),
-                                ),
-                                message: Some("451 Requested action aborted\r\n".into()),
-                                data: None,
-                            };
-                        }
+                    Err(e) => {
+                        error!("Failed to read from file {}: {}", filename, e);
+                        return Err((
+                            CommandStatus::Failure("451 Requested action aborted\r\n".into()),
+                            "451 Requested action aborted\r\n",
+                        ));
                     }
                 }
-
-                if data_stream.flush().is_ok() {
-                    return CommandResult {
-                        status: CommandStatus::Success,
-                        message: Some("226 Transfer complete\r\n".into()),
-                        data: None,
-                    };
-                }
             }
-            Err(e) => {
-                error!("Failed to open file {}: {}", filename, e);
-                return CommandResult {
-                    status: CommandStatus::Failure("550 Failed to open file\r\n".into()),
-                    message: Some("550 Failed to open file\r\n".into()),
-                    data: None,
-                };
+
+            if data_stream.flush().is_ok() {
+                Ok((CommandStatus::Success, "226 Transfer complete\r\n"))
+            } else {
+                Err((
+                    CommandStatus::Failure("450 Requested file action not taken\r\n".into()),
+                    "450 Requested file action not taken\r\n",
+                ))
             }
         }
-    }
-
-    CommandResult {
-        status: CommandStatus::Failure("425 Can't open data connection\r\n".into()),
-        message: Some("425 Can't open data connection\r\n".into()),
-        data: None,
-    }
-}
-
-pub fn handle_list_command(
-    clients: &Arc<Mutex<HashMap<SocketAddr, Client>>>,
-    client_addr: &SocketAddr,
-) -> CommandResult {
-    info!("Client {} requested directory listing", client_addr);
-
-    if let Some(mut data_stream) = data_channel::setup_data_stream(clients, client_addr) {
-        match std::fs::read_dir(".") {
-            Ok(entries) => {
-                let mut file_list = String::new();
-                for entry in entries.flatten() {
-                    file_list.push_str(&format!("{}\r\n", entry.file_name().to_string_lossy()));
-                }
-
-                if let Err(e) = data_stream.write_all(file_list.as_bytes()) {
-                    error!("Failed to write to data stream: {}", e);
-                    return CommandResult {
-                        status: CommandStatus::Failure(
-                            "426 Connection closed; transfer aborted\r\n".into(),
-                        ),
-                        message: Some("426 Connection closed; transfer aborted\r\n".into()),
-                        data: None,
-                    };
-                } else if data_stream.flush().is_ok() {
-                    return CommandResult {
-                        status: CommandStatus::Success,
-                        message: Some("226 Transfer complete\r\n".into()),
-                        data: None,
-                    };
-                }
-            }
-            Err(e) => {
-                error!("Failed to read directory: {}", e);
-                return CommandResult {
-                    status: CommandStatus::Failure("550 Failed to list directory\r\n".into()),
-                    message: Some("550 Failed to list directory\r\n".into()),
-                    data: None,
-                };
-            }
+        Err(e) => {
+            error!("Failed to open file {}: {}", filename, e);
+            Err((
+                CommandStatus::Failure("550 Failed to open file\r\n".into()),
+                "550 Failed to open file\r\n",
+            ))
         }
-    }
-
-    CommandResult {
-        status: CommandStatus::Failure("425 Can't open data connection\r\n".into()),
-        message: Some("425 Can't open data connection\r\n".into()),
-        data: None,
     }
 }

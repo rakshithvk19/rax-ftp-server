@@ -5,11 +5,13 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use crate::channel_registry::ChannelRegistry;
 use crate::client::Client;
 use crate::client_handler::handle_client;
 
 pub struct Server {
-    clients: Arc<Mutex<HashMap<SocketAddr, Client>>>,
+    client_registry: Arc<Mutex<HashMap<SocketAddr, Client>>>,
+    channel_registry: Arc<Mutex<ChannelRegistry>>,
 }
 
 const COMMAND_SOCKET: &str = "127.0.0.1:2121";
@@ -18,13 +20,14 @@ const MAX_CLIENTS: usize = 10;
 impl Server {
     pub fn new() -> Self {
         Self {
-            clients: Arc::new(Mutex::new(HashMap::new())),
+            client_registry: Arc::new(Mutex::new(HashMap::new())),
+            channel_registry: Arc::new(Mutex::new(ChannelRegistry::default())),
         }
     }
 
     fn check_max_clients(&self, cmd_stream: &mut TcpStream, client_addr: &SocketAddr) -> bool {
         let client_count = {
-            let clients = self.clients.lock().unwrap();
+            let clients = self.client_registry.lock().unwrap();
             clients.len()
         };
 
@@ -73,21 +76,30 @@ impl Server {
                         "New connection: {} ({}/{} clients)",
                         client_addr,
                         {
-                            let clients = self.clients.lock().unwrap();
+                            let clients = self.client_registry.lock().unwrap();
                             clients.len() + 1
                         },
                         MAX_CLIENTS
                     );
 
                     {
-                        let mut clients = self.clients.lock().unwrap();
-                        clients.insert(client_addr.clone(), Client::default());
+                        let mut clients = self.client_registry.lock().unwrap();
+                        let mut client = Client::default();
+                        client.set_client_addr(Some(client_addr));
+                        clients.insert(client_addr.clone(), client);
                     }
 
-                    let clients_ref = Arc::clone(&self.clients);
+                    let client_registry_ref = Arc::clone(&self.client_registry);
+                    let channel_registry_ref = Arc::clone(&self.channel_registry);
 
                     thread::spawn(move || {
-                        handle_client(cmd_stream, clients_ref, client_addr);
+                        handle_client(
+                            cmd_stream,
+                            client_registry_ref,
+                            client_addr,
+                            channel_registry_ref,
+                        );
+                        // handle_client(cmd_stream, client_registry_ref, client_addr);
                     });
                 }
                 Err(e) => error!("Error accepting connection: {}", e),

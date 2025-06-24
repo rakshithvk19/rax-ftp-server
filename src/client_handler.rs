@@ -1,18 +1,20 @@
+//client_handler.rs
+
 use log::{error, info};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::{Arc, Mutex};
 
+use crate::channel_registry;
 use crate::client::Client;
-use crate::commands::{Command, CommandData, CommandStatus, handle_command, parse_command};
-use crate::data_channel;
-use crate::file_transfer;
+use crate::commands::{CommandData, CommandStatus, handle_command, parse_command};
 
 pub fn handle_client(
     mut cmd_stream: TcpStream,
     clients: Arc<Mutex<HashMap<SocketAddr, Client>>>,
     client_addr: SocketAddr,
+    channel_registry: Arc<Mutex<channel_registry::ChannelRegistry>>,
 ) {
     if let Err(e) = cmd_stream.write_all(b"220 Welcome to the Rax FTP server\r\n") {
         error!("Failed to send welcome: {}", e);
@@ -37,10 +39,12 @@ pub fn handle_client(
                     command_buffer.clear();
 
                     let mut clients_guard = clients.lock().unwrap();
+                    let mut channel_registry_guard = channel_registry.lock().unwrap();
 
                     match clients_guard.get_mut(&client_addr) {
                         Some(client) => {
-                            let result = handle_command(client, &command);
+                            let result =
+                                handle_command(client, &command, &mut *channel_registry_guard);
 
                             let final_result = match result.status {
                                 CommandStatus::CloseConnection => {
@@ -55,31 +59,24 @@ pub fn handle_client(
                                     result // already includes the message
                                 }
                                 CommandStatus::Success => match &result.data {
-                                    Some(CommandData::Connect(socket_address)) => {
-                                        data_channel::handle_connect_command(
-                                            &clients,
-                                            &client_addr,
-                                            Some(*socket_address),
-                                            &mut cmd_stream,
-                                        )
-                                    }
-                                    Some(CommandData::File(filename)) => {
-                                        if command == Command::STOR(filename.clone()) {
-                                            file_transfer::handle_stor_command(
-                                                &clients,
-                                                &client_addr,
-                                                filename,
-                                            )
-                                        } else {
-                                            file_transfer::handle_retr_command(
-                                                &clients,
-                                                &client_addr,
-                                                filename,
-                                            )
+                                    Some(CommandData::DirectoryListing(listing)) => {
+                                        // Construct listing output
+                                        let mut listing_output = String::new();
+                                        for entry in listing {
+                                            listing_output.push_str(&format!("{}\r\n", entry));
                                         }
-                                    }
-                                    Some(CommandData::DirectoryListing(_)) => {
-                                        file_transfer::handle_list_command(&clients, &client_addr)
+
+                                        // Send the listing to the client on the control stream
+                                        if let Err(e) =
+                                            cmd_stream.write_all(listing_output.as_bytes())
+                                        {
+                                            error!(
+                                                "Failed to send directory listing to client {}: {}",
+                                                client_addr, e
+                                            );
+                                        }
+
+                                        result // return the result to let the message (like "226 Transfer complete") be sent
                                     }
                                     _ => result, // success without follow-up action
                                 },
