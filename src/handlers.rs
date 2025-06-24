@@ -447,7 +447,7 @@ fn handle_cmd_pasv(client: &mut Client, channel_registry: &mut ChannelRegistry) 
     }
 
     // Step 2: Prevent duplicate initialization of the data channel
-    if client.is_data_channel_init() {
+    if channel_registry.contains(&client_addr) {
         return CommandResult {
             status: CommandStatus::Failure("Data channel already initialized".into()),
             message: Some("425 Data connection already initialized\r\n".into()),

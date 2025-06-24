@@ -23,12 +23,17 @@ A Rust-based File Transfer Protocol (FTP) server implementing core features of R
 
 ## Project Structure
 
-- `src/main.rs`: Initializes logging and starts the server.
-- `src/server.rs`: Manages control connections (`TcpListener` on 2121) and client threads.
-- `src/client.rs`: Handles client state (authentication, data connections).
-- `src/commands/`:
-  - `parser.rs`: Parses FTP commands.
-  - `handlers.rs`: Executes commands.
+- `main.rs`: Initializes logging and starts the FTP server.
+- `server.rs`: Implements the main FTP server, managing client connections, enforcing a client limit, and spawning handler threads for each new client.
+- `client.rs`: Defines the Client struct and its methods for managing FTP client state and authentication.
+- `client_handler.rs`: Handles client connections and processes FTP commands.
+- `command.rs`: Defines command parsing logic and related data structures for handling FTP commands.
+- `handlers.rs`: Defines handlers for FTP commands, coordinating authentication, file operations, directory management, and data channel setup for each client.
+- `auth.rs`: Provides authentication logic and error handling for FTP users.
+- `channel_registry.rs`: Manages a registry of data channels for FTP connections.
+- `data_channel.rs`: Manages accepting and handling data connections for file transfers in an FTP-like server, coordinating client-specific TCP listeners.
+- `file_transfer.rs`: Handles file upload and download operations for the FTP server.
+- `lib.rs`: Library root, re-exports modules and the server.
 
 ## Requirements
 
