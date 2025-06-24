@@ -1,4 +1,3 @@
-
 // Command enum to represent FTP commands
 #[derive(Debug, PartialEq)]
 pub enum Command {
@@ -11,9 +10,11 @@ pub enum Command {
     PASS(String),
     RETR(String),
     STOR(String),
+    DEL(String),
     PORT(String),
     PASV(),
-    UNKNOWN(String),
+    UNKNOWN,
+    RAX,
 }
 
 pub enum CommandStatus {
@@ -49,8 +50,10 @@ pub fn parse_command(raw: &str) -> Command {
         "PASS" => Command::PASS(arg.to_string()),
         "RETR" => Command::RETR(arg.to_string()),
         "STOR" => Command::STOR(arg.to_string()),
+        "DEL" => Command::DEL(arg.to_string()),
         "PORT" => Command::PORT(arg.to_string()),
         "PASV" => Command::PASV(),
-        _ => Command::UNKNOWN(trimmed.to_string()),
+        "RAX" => Command::RAX,
+        _ => Command::UNKNOWN,
     }
 }

@@ -12,7 +12,7 @@
 2. Add `LOGOUT` command.
 
 ## Directory Navigation
-1. Implement `CWD` (change working directory) and `PWD` (print working directory).
+1. Implement `CWD` (change working directory) and `PWD` (print working directory). -- done
 2. Enhance testing for all commands.
 
 ## Multi-Threading Optimization
@@ -20,12 +20,12 @@
 2. Ensure thread safety for shared resources.
 
 ## Data Connection Support
-1. Implement `PORT` command for active mode data connections.
-2. Extend `STOR` to receive data over a separate `TcpStream` using `PUT` command.
+1. Implement `PORT` command for active mode data connections. -- done
+2. Extend `STOR` to receive data over a separate `TcpStream` using `PUT` command. -- done
 
 ## Async Refactoring with Tokio
 1. Refactor server to use Tokio for async I/O.
-2. Support `PASV` for passive mode data connections.
+2. Support `PASV` for passive mode data connections. -- done
 
 ## Additional Commands
 1. Implement `DELE` (delete file), `MKD` (make directory), `RMD` (remove directory).

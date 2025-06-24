@@ -2,7 +2,7 @@
 use crate::auth;
 use crate::channel_registry::{ChannelEntry, ChannelRegistry};
 use crate::client::Client;
-use crate::commands::parser::{Command, CommandData, CommandResult, CommandStatus};
+use crate::command::{Command, CommandData, CommandResult, CommandStatus};
 use crate::data_channel::setup_data_stream;
 use crate::file_transfer::{handle_file_download, handle_file_upload};
 use log::{error, info};
@@ -27,10 +27,12 @@ pub fn handle_command(
         Command::LOGOUT => handle_cmd_logout(client),
         Command::RETR(filename) => handle_cmd_retr(client, &filename, channel_registry),
         Command::STOR(filename) => handle_cmd_stor(client, &filename, channel_registry),
+        Command::DEL(filename) => handle_cmd_del(client, &filename),
         Command::CWD(path) => handle_cmd_cwd(client, &path),
-        Command::UNKNOWN(cmd) => handle_cmd_unknown(client, &cmd),
         Command::PASV() => handle_cmd_pasv(client, channel_registry),
         Command::PORT(addr) => handle_cmd_port(client, channel_registry, &addr),
+        Command::RAX => handle_cmd_rax(),
+        Command::UNKNOWN => handle_cmd_unknown(),
     }
 }
 
@@ -111,7 +113,7 @@ fn handle_cmd_list(client: &mut Client) -> CommandResult {
     let client_addr = client.client_addr().unwrap();
     info!("Client {} requested directory listing", client_addr);
 
-    match fs::read_dir(".") {
+    match fs::read_dir("./test_dir") {
         Ok(entries) => {
             let mut file_list = vec![];
 
@@ -150,26 +152,6 @@ fn handle_cmd_logout(client: &mut Client) -> CommandResult {
             message: Some("530 User Not logged in\r\n".into()),
             data: None,
         }
-    }
-}
-
-fn handle_cmd_unknown(client: &Client, cmd: &str) -> CommandResult {
-    if !client.is_logged_in() {
-        return CommandResult {
-            status: CommandStatus::Failure("Not logged in".into()),
-            message: Some("530 Not logged in\r\n".into()),
-            data: None,
-        };
-    }
-    let msg = if cmd == "rax" {
-        "Rax is the best\r\n"
-    } else {
-        "500 Unknown command\r\n"
-    };
-    CommandResult {
-        status: CommandStatus::Failure("Unknown command".into()),
-        message: Some(msg.into()),
-        data: None,
     }
 }
 
@@ -275,7 +257,7 @@ pub fn handle_cmd_stor(
     }
 }
 
-pub fn handle_cmd_retr(
+fn handle_cmd_retr(
     client: &mut Client,
     filename: &str,
     channel_registry: &mut ChannelRegistry,
@@ -374,6 +356,35 @@ pub fn handle_cmd_retr(
     }
 }
 
+fn handle_cmd_del(client: &mut Client, filename: &str) -> CommandResult {
+    if !client.is_logged_in() {
+        return CommandResult {
+            status: CommandStatus::Failure("Not logged in".into()),
+            message: Some("530 Not logged in\r\n".into()),
+            data: None,
+        };
+    }
+    if filename.is_empty() {
+        return CommandResult {
+            status: CommandStatus::Failure("Missing filename".into()),
+            message: Some("501 Syntax error in parameters or arguments\r\n".into()),
+            data: None,
+        };
+    }
+    match fs::remove_file(filename) {
+        Ok(_) => CommandResult {
+            status: CommandStatus::Success,
+            message: Some("250 File deleted successfully\r\n".into()),
+            data: None,
+        },
+        Err(e) => CommandResult {
+            status: CommandStatus::Failure(e.to_string()),
+            message: Some("550 Failed to delete file\r\n".into()),
+            data: None,
+        },
+    }
+}
+
 fn handle_cmd_cwd(client: &Client, path: &String) -> CommandResult {
     if !client.is_logged_in() {
         return CommandResult {
@@ -421,10 +432,7 @@ fn handle_cmd_pwd(client: &Client) -> CommandResult {
 // Handle the PASV command to enter passive mode
 // This function binds a socket for the data connection
 // Does not return a data stream, just the socket address
-pub fn handle_cmd_pasv(
-    client: &mut Client,
-    channel_registry: &mut ChannelRegistry,
-) -> CommandResult {
+fn handle_cmd_pasv(client: &mut Client, channel_registry: &mut ChannelRegistry) -> CommandResult {
     let client_addr = client.client_addr().unwrap().clone();
     // Step 1: Check if the client is logged in
     if !client.is_logged_in() {
@@ -504,7 +512,7 @@ pub fn handle_cmd_pasv(
     }
 }
 
-pub fn handle_cmd_port(
+fn handle_cmd_port(
     client: &mut Client,
     channel_registry: &mut ChannelRegistry,
     addr: &String,
@@ -591,5 +599,21 @@ pub fn handle_cmd_port(
                 data: None,
             }
         }
+    }
+}
+
+fn handle_cmd_rax() -> CommandResult {
+    CommandResult {
+        status: CommandStatus::Success,
+        message: Some("200 Rax is the best\r\n".into()),
+        data: None,
+    }
+}
+
+fn handle_cmd_unknown() -> CommandResult {
+    CommandResult {
+        status: CommandStatus::Failure("Unknown command".into()),
+        message: Some("500 Syntax error, command unrecognized\r\n".into()),
+        data: None,
     }
 }

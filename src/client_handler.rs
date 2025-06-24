@@ -8,7 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::channel_registry;
 use crate::client::Client;
-use crate::commands::{CommandData, CommandStatus, handle_command, parse_command};
+use crate::command::{CommandData, CommandStatus, parse_command};
+use crate::handlers::handle_command;
 
 pub fn handle_client(
     mut cmd_stream: TcpStream,

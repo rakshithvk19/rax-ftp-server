@@ -1,11 +1,10 @@
 //file_transfer.rs
 
+use crate::command::CommandStatus;
 use log::error;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-
-use crate::commands::CommandStatus;
 
 pub fn handle_file_upload(
     mut data_stream: TcpStream,

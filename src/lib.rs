@@ -1,10 +1,10 @@
 pub mod auth;
+pub mod channel_registry;
 pub mod client;
 pub mod client_handler;
-pub mod commands;
+pub mod command;
 pub mod data_channel;
-pub mod channel_registry;
 pub mod file_transfer;
 pub mod server;
-
+pub mod handlers;
 pub use server::Server;
