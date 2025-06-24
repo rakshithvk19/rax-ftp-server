@@ -28,7 +28,8 @@
 2. Support `PASV` for passive mode data connections. -- done
 
 ## Additional Commands
-1. Implement `DELE` (delete file), `MKD` (make directory), `RMD` (remove directory).
+1. Implement `DELE` (delete file) -- done, 
+2. `MKD` (make directory), `RMD` (remove directory).
 2. Enhance error handling.
 
 ## Security and Configuration

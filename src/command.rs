@@ -1,3 +1,6 @@
+// command.rs
+// Defines command parsing logic and related data structures for handling FTP commands
+
 // Command enum to represent FTP commands
 #[derive(Debug, PartialEq)]
 pub enum Command {

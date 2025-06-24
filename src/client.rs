@@ -1,4 +1,5 @@
-//client.rs
+// client.rs
+// Defines the Client struct and its methods for managing FTP client state and authentication.
 
 use std::net::SocketAddr;
 

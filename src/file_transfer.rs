@@ -1,4 +1,5 @@
 //file_transfer.rs
+// Handles file upload and download operations for the FTP server.
 
 use crate::command::CommandStatus;
 use log::error;
@@ -38,20 +39,20 @@ pub fn handle_file_upload(
             }
 
             if file.flush().is_ok() {
-                return Ok((CommandStatus::Success, "226 Transfer complete\r\n"));
+                Ok((CommandStatus::Success, "226 Transfer complete\r\n"))
             } else {
-                return Err((
+                Err((
                     CommandStatus::Failure("450 Requested file action not taken\r\n".into()),
                     "450 Requested file action not taken\r\n",
-                ));
+                ))
             }
         }
         Err(e) => {
             error!("Failed to create file {}: {}", filename, e);
-            return Err((
+            Err((
                 CommandStatus::Failure("550 Requested action not taken\r\n".into()),
                 "550 Requested action not taken\r\n",
-            ));
+            ))
         }
     }
 }

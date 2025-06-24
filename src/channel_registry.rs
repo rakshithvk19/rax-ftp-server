@@ -1,3 +1,6 @@
+// channel_registry.rs
+// Manages a registry of data channels for FTP connections.
+
 use std::collections::HashMap;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 

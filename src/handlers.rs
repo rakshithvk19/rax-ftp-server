@@ -1,4 +1,7 @@
 // handlers.rs
+// This file defines handlers for FTP commands, coordinating authentication,
+// file operations, directory management, and data channel setup for each client.
+
 use crate::auth;
 use crate::channel_registry::{ChannelEntry, ChannelRegistry};
 use crate::client::Client;

@@ -29,7 +29,6 @@ A Rust-based File Transfer Protocol (FTP) server implementing core features of R
 - `src/commands/`:
   - `parser.rs`: Parses FTP commands.
   - `handlers.rs`: Executes commands.
-- `tests/`: Unit and integration tests.
 
 ## Requirements
 
@@ -129,36 +128,23 @@ A Rust-based File Transfer Protocol (FTP) server implementing core features of R
 
 3. Check logs for client IPs, commands, and transfer status.
 
-## Testing
+## Supported Commands
 
-- Run automated tests:
-  ```bash
-  cargo test
-  ```
-  - Covers server startup and basic command parsing.
-
-- Manual testing:
-  - Use `telnet`/`netcat` as above for `PORT`, `PASV`, `STOR`, `RETR`, `LIST`, etc.
-  - Test invalid inputs (e.g., `PORT 192.168.1.100::2122` → `501 Invalid IP address`).
-  - Verify concurrent clients by opening multiple `telnet` sessions.
-
-## Known Limitations
-
-- **Hardcoded Credentials**: Single user (`user/pass`) for authentication.
-- **Data Channel Closure**: `PORT` and `PASV` data connections close after each transfer.
-- **Basic Error Handling**: Limited validation for `CWD` paths.
-- **IPv4 Only**: `PORT` supports IPv4 addresses.
-
-## Future Work
-
-- **Week 6**: Enhance `CWD` validation, add timeout for `PORT` connections.
-- **Week 7–8**: Implement persistent data channels for `PORT`/`PASV`.
-- **Week 9–10**: Transition to Tokio for async I/O, add admin commands (e.g., list clients).
-- **Testing**: Add integration tests for all commands and concurrency.
-
-## Contributing
-
-This is a personal portfolio project. Feedback is welcome via GitHub issues or pull requests.
+| Command | Description 
+|---------|-------------
+| `USER` | Specify username 
+| `PASS` | Specify password 
+| `QUIT` | Disconnect from server 
+| `LOGOUT` | Log out current user 
+| `LIST` | Directory listing 
+| `PWD` | Print working directory 
+| `CWD` | Change working directory 
+| `RETR` | Download/retrieve file 
+| `STOR` | Upload/store file 
+| `DEL` | Delete file 
+| `PORT` | Specifies the client-side IP address and port number for the server to connect to for the upcoming data transfer. This enables active mode, where the client listens for a data connection and the server initiates the connection to the provided address and port. Format: PORT <ip>::<port> (e.g., PORT 127.0.0.1::2122).
+| `PASV` | Instructs the server to enter passive mode by opening a new listening port for data transfer. The server responds with the IP address and port number, and the client then initiates the data connection to this address. This is useful when the client is behind a firewall or NAT and cannot accept incoming connections.
+|
 
 ## License
 

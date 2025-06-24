@@ -1,4 +1,5 @@
 //client_handler.rs
+// Handles client connections and processes FTP commands
 
 use log::{error, info};
 use std::collections::HashMap;

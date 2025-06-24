@@ -1,3 +1,7 @@
+// server.rs
+// This file implements the main FTP server, managing client connections,
+// enforcing a client limit, and spawning handler threads for each new client.
+
 use log::{error, info, warn};
 use std::collections::HashMap;
 use std::io::Write;
@@ -99,7 +103,6 @@ impl Server {
                             client_addr,
                             channel_registry_ref,
                         );
-                        // handle_client(cmd_stream, client_registry_ref, client_addr);
                     });
                 }
                 Err(e) => error!("Error accepting connection: {}", e),

@@ -1,3 +1,6 @@
+// auth.rs
+// Provides authentication logic and error handling for FTP users.
+
 use std::collections::HashMap;
 use std::sync::LazyLock;
 

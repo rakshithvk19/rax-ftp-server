@@ -1,3 +1,7 @@
+// data_channel.rs
+// This file manages accepting and handling data connections for file transfers in an FTP-like server
+// coordinating client-specific TCP listeners.
+
 use log::{error, info};
 use std::net::{SocketAddr, TcpStream};
 use std::thread;
