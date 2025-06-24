@@ -21,6 +21,12 @@ pub struct Server {
 const COMMAND_SOCKET: &str = "127.0.0.1:2121";
 const MAX_CLIENTS: usize = 10;
 
+impl Default for Server {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Server {
     pub fn new() -> Self {
         Self {
@@ -90,7 +96,7 @@ impl Server {
                         let mut clients = self.client_registry.lock().unwrap();
                         let mut client = Client::default();
                         client.set_client_addr(Some(client_addr));
-                        clients.insert(client_addr.clone(), client);
+                        clients.insert(client_addr, client);
                     }
 
                     let client_registry_ref = Arc::clone(&self.client_registry);

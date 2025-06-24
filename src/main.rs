@@ -1,4 +1,3 @@
-use env_logger;
 use log::{error, info};
 
 use rax_ftp_server::Server;

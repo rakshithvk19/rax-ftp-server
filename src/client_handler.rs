@@ -46,7 +46,7 @@ pub fn handle_client(
                     match clients_guard.get_mut(&client_addr) {
                         Some(client) => {
                             let result =
-                                handle_command(client, &command, &mut *channel_registry_guard);
+                                handle_command(client, &command, &mut channel_registry_guard);
 
                             let final_result = match result.status {
                                 CommandStatus::CloseConnection => {

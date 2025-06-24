@@ -28,12 +28,12 @@ pub fn handle_command(
         Command::LIST => handle_cmd_list(client),
         Command::PWD => handle_cmd_pwd(client),
         Command::LOGOUT => handle_cmd_logout(client),
-        Command::RETR(filename) => handle_cmd_retr(client, &filename, channel_registry),
-        Command::STOR(filename) => handle_cmd_stor(client, &filename, channel_registry),
-        Command::DEL(filename) => handle_cmd_del(client, &filename),
-        Command::CWD(path) => handle_cmd_cwd(client, &path),
+        Command::RETR(filename) => handle_cmd_retr(client, filename, channel_registry),
+        Command::STOR(filename) => handle_cmd_stor(client, filename, channel_registry),
+        Command::DEL(filename) => handle_cmd_del(client, filename),
+        Command::CWD(path) => handle_cmd_cwd(client, path),
         Command::PASV() => handle_cmd_pasv(client, channel_registry),
-        Command::PORT(addr) => handle_cmd_port(client, channel_registry, &addr),
+        Command::PORT(addr) => handle_cmd_port(client, channel_registry, addr),
         Command::RAX => handle_cmd_rax(),
         Command::UNKNOWN => handle_cmd_unknown(),
     }
@@ -49,12 +49,12 @@ fn handle_cmd_quit(client: &mut Client) -> CommandResult {
     }
 }
 
-fn handle_cmd_user(client: &mut Client, username: &String) -> CommandResult {
-    match auth::validate_user(&username) {
+fn handle_cmd_user(client: &mut Client, username: &str) -> CommandResult {
+    match auth::validate_user(username) {
         Ok(response) => {
             client.set_user_valid(true);
             client.set_logged_in(false);
-            client.set_username(Some(username.clone()));
+            client.set_username(Some(username.to_string()));
             CommandResult {
                 status: CommandStatus::Success,
                 message: Some(response.into()),
@@ -74,10 +74,10 @@ fn handle_cmd_user(client: &mut Client, username: &String) -> CommandResult {
     }
 }
 
-fn handle_cmd_pass(client: &mut Client, password: &String) -> CommandResult {
+fn handle_cmd_pass(client: &mut Client, password: &str) -> CommandResult {
     if client.is_user_valid() {
         if let Some(username) = &client.username() {
-            match auth::validate_password(username, &password) {
+            match auth::validate_password(username, password) {
                 Ok(response) => {
                     client.set_logged_in(true);
                     return CommandResult {
@@ -304,7 +304,7 @@ fn handle_cmd_retr(
             data: None,
         };
     }
-    if !fs::metadata(filename).is_ok() {
+    if fs::metadata(filename).is_err() {
         return CommandResult {
             status: CommandStatus::Failure("File not found".into()),
             message: Some("550 File not found\r\n".into()),
@@ -388,7 +388,7 @@ fn handle_cmd_del(client: &mut Client, filename: &str) -> CommandResult {
     }
 }
 
-fn handle_cmd_cwd(client: &Client, path: &String) -> CommandResult {
+fn handle_cmd_cwd(client: &Client, path: &str) -> CommandResult {
     if !client.is_logged_in() {
         return CommandResult {
             status: CommandStatus::Failure("Not logged in".into()),
@@ -436,7 +436,7 @@ fn handle_cmd_pwd(client: &Client) -> CommandResult {
 // This function binds a socket for the data connection
 // Does not return a data stream, just the socket address
 fn handle_cmd_pasv(client: &mut Client, channel_registry: &mut ChannelRegistry) -> CommandResult {
-    let client_addr = client.client_addr().unwrap().clone();
+    let client_addr = *client.client_addr().unwrap();
     // Step 1: Check if the client is logged in
     if !client.is_logged_in() {
         return CommandResult {
@@ -518,9 +518,9 @@ fn handle_cmd_pasv(client: &mut Client, channel_registry: &mut ChannelRegistry) 
 fn handle_cmd_port(
     client: &mut Client,
     channel_registry: &mut ChannelRegistry,
-    addr: &String,
+    addr: &str,
 ) -> CommandResult {
-    let client_addr = client.client_addr().unwrap().clone();
+    let client_addr = *client.client_addr().unwrap();
 
     // Step 1: Check if the client is logged in
     if !client.is_logged_in() {
