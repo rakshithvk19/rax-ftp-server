@@ -5,6 +5,10 @@ pub mod client_handler;
 pub mod command;
 pub mod data_channel;
 pub mod file_transfer;
-pub mod server;
 pub mod handlers;
-pub use server::Server;
+mod server;
+
+pub fn start_server() {
+    let server = server::Server::new();
+    server.start();
+}
