@@ -1,6 +1,8 @@
-// handlers.rs
-// This file defines handlers for FTP commands, coordinating authentication,
-// file operations, directory management, and data channel setup for each client.
+//! Command handlers module for the Rax FTP server.
+//!
+//! This module defines handler functions for FTP commands, handling
+//! authentication, file operations, directory management, and data channel
+//! setup per client connection.
 
 use crate::auth;
 use crate::channel_registry::{ChannelEntry, ChannelRegistry};
@@ -15,7 +17,17 @@ use std::fs;
 use std::net::{SocketAddr, TcpListener};
 use std::str::FromStr;
 
-// Handle a single command and update server
+/// Dispatches a received FTP command to its corresponding handler.
+///
+/// # Arguments
+///
+/// * `client` - Mutable reference to the client sending the command.
+/// * `command` - Reference to the parsed FTP command enum.
+/// * `channel_registry` - Mutable reference to the global channel registry.
+///
+/// # Returns
+///
+/// * `CommandResult` - Result of the command execution, including status and message.
 pub fn handle_command(
     client: &mut Client,
     command: &Command,
@@ -39,6 +51,7 @@ pub fn handle_command(
     }
 }
 
+/// Handles the QUIT command: logs out the client and signals connection close.
 fn handle_cmd_quit(client: &mut Client) -> CommandResult {
     client.logout();
 
@@ -49,6 +62,9 @@ fn handle_cmd_quit(client: &mut Client) -> CommandResult {
     }
 }
 
+/// Handles the USER command: validates username and sets client state accordingly.
+///
+/// Returns success response if valid; failure otherwise.
 fn handle_cmd_user(client: &mut Client, username: &str) -> CommandResult {
     match auth::validate_user(username) {
         Ok(response) => {
@@ -74,6 +90,9 @@ fn handle_cmd_user(client: &mut Client, username: &str) -> CommandResult {
     }
 }
 
+/// Handles the PASS command: validates password if username was previously validated.
+///
+/// Returns success if password matches; failure otherwise.
 fn handle_cmd_pass(client: &mut Client, password: &str) -> CommandResult {
     if client.is_user_valid() {
         if let Some(username) = &client.username() {
@@ -97,6 +116,7 @@ fn handle_cmd_pass(client: &mut Client, password: &str) -> CommandResult {
             }
         }
     }
+    // Username not set or invalid
     CommandResult {
         status: CommandStatus::Failure("Username not provided".into()),
         message: Some("530 Please enter the username first\r\n".into()),
@@ -104,6 +124,9 @@ fn handle_cmd_pass(client: &mut Client, password: &str) -> CommandResult {
     }
 }
 
+/// Handles the LIST command: provides directory listing to logged-in clients.
+///
+/// Reads the `./test_dir` directory and returns file names in the response data.
 fn handle_cmd_list(client: &mut Client) -> CommandResult {
     if !client.is_logged_in() {
         return CommandResult {
@@ -141,6 +164,7 @@ fn handle_cmd_list(client: &mut Client) -> CommandResult {
     }
 }
 
+/// Handles the LOGOUT command: logs out the client if currently logged in.
 fn handle_cmd_logout(client: &mut Client) -> CommandResult {
     if client.is_logged_in() {
         client.logout();
@@ -158,6 +182,12 @@ fn handle_cmd_logout(client: &mut Client) -> CommandResult {
     }
 }
 
+/// Handles the STOR command: uploads a file from client to server.
+///
+/// Performs client authentication and filename validation,
+/// establishes a data channel, then delegates to file upload handler.
+///
+/// Returns status and message describing the outcome.
 pub fn handle_cmd_stor(
     client: &mut Client,
     filename: &str,
@@ -166,7 +196,7 @@ pub fn handle_cmd_stor(
     use log::{error, info};
     use std::fs;
 
-    // 1. Validation
+    // 1. Authentication check
     if !client.is_logged_in() {
         return CommandResult {
             status: CommandStatus::Failure("Not logged in".into()),
@@ -174,6 +204,8 @@ pub fn handle_cmd_stor(
             data: None,
         };
     }
+
+    // 2. Data channel initialization check
     if !client.is_data_channel_init() {
         return CommandResult {
             status: CommandStatus::Failure("Data channel not initialized".into()),
@@ -181,6 +213,8 @@ pub fn handle_cmd_stor(
             data: None,
         };
     }
+
+    // 3. Filename presence check
     if filename.is_empty() {
         return CommandResult {
             status: CommandStatus::Failure("Missing filename".into()),
@@ -188,6 +222,8 @@ pub fn handle_cmd_stor(
             data: None,
         };
     }
+
+    // 4. Filename sanitization to prevent directory traversal and invalid characters
     if filename.contains("..")
         || filename.contains('/')
         || filename.contains('\\')
@@ -205,6 +241,8 @@ pub fn handle_cmd_stor(
             data: None,
         };
     }
+
+    // 5. Check if file already exists
     if fs::metadata(filename).is_ok() {
         return CommandResult {
             status: CommandStatus::Failure("File exists".into()),
@@ -213,6 +251,7 @@ pub fn handle_cmd_stor(
         };
     }
 
+    // 6. Retrieve client address for logging
     let client_addr = match client.client_addr() {
         Some(addr) => addr,
         None => {
@@ -229,7 +268,7 @@ pub fn handle_cmd_stor(
         client_addr, filename
     );
 
-    // 2. Setup data stream
+    // 7. Setup data stream for file upload
     let data_stream = match setup_data_stream(channel_registry, client_addr) {
         Some(stream) => stream,
         None => {
@@ -245,7 +284,7 @@ pub fn handle_cmd_stor(
         }
     };
 
-    // 3. Pass TcpStream and filename to the actual file writing function
+    // 8. Delegate file upload to file transfer module
     match handle_file_upload(data_stream, filename) {
         Ok((status, msg)) => CommandResult {
             status,
@@ -260,12 +299,18 @@ pub fn handle_cmd_stor(
     }
 }
 
+/// Handles the RETR command: downloads a file from server to client.
+///
+/// Performs client authentication and filename validation,
+/// establishes a data channel, then delegates to file download handler.
+///
+/// Returns status and message describing the outcome.
 fn handle_cmd_retr(
     client: &mut Client,
     filename: &str,
     channel_registry: &mut ChannelRegistry,
 ) -> CommandResult {
-    // 1. Validation
+    // 1. Authentication check
     if !client.is_logged_in() {
         return CommandResult {
             status: CommandStatus::Failure("Not logged in".into()),
@@ -273,6 +318,8 @@ fn handle_cmd_retr(
             data: None,
         };
     }
+
+    // 2. Data channel initialized check
     if !client.is_data_channel_init() {
         return CommandResult {
             status: CommandStatus::Failure("Data channel not initialized".into()),
@@ -280,6 +327,8 @@ fn handle_cmd_retr(
             data: None,
         };
     }
+
+    // 3. Filename presence check
     if filename.is_empty() {
         return CommandResult {
             status: CommandStatus::Failure("Missing filename".into()),
@@ -287,6 +336,8 @@ fn handle_cmd_retr(
             data: None,
         };
     }
+
+    // 4. Filename sanitization
     if filename.contains("..")
         || filename.contains('/')
         || filename.contains('\\')
@@ -304,6 +355,8 @@ fn handle_cmd_retr(
             data: None,
         };
     }
+
+    // 5. Check if file exists
     if fs::metadata(filename).is_err() {
         return CommandResult {
             status: CommandStatus::Failure("File not found".into()),
@@ -312,6 +365,7 @@ fn handle_cmd_retr(
         };
     }
 
+    // 6. Retrieve client address
     let client_addr = match client.client_addr() {
         Some(addr) => addr,
         None => {
@@ -328,7 +382,7 @@ fn handle_cmd_retr(
         client_addr, filename
     );
 
-    // 2. Setup data stream
+    // 7. Setup data stream for file download
     let data_stream = match setup_data_stream(channel_registry, client_addr) {
         Some(stream) => stream,
         None => {
@@ -344,7 +398,7 @@ fn handle_cmd_retr(
         }
     };
 
-    // 3. Pass TcpStream and filename to the actual file reading function
+    // 8. Delegate file download to file transfer module
     match handle_file_download(data_stream, filename) {
         Ok((status, msg)) => CommandResult {
             status,
@@ -359,6 +413,9 @@ fn handle_cmd_retr(
     }
 }
 
+/// Handles the DEL command: deletes a specified file on the server.
+///
+/// Checks authentication and file presence before deletion.
 fn handle_cmd_del(client: &mut Client, filename: &str) -> CommandResult {
     if !client.is_logged_in() {
         return CommandResult {
@@ -388,6 +445,9 @@ fn handle_cmd_del(client: &mut Client, filename: &str) -> CommandResult {
     }
 }
 
+/// Handles the CWD command: changes the current working directory of the server.
+///
+/// Returns success if directory changed; failure otherwise.
 fn handle_cmd_cwd(client: &Client, path: &str) -> CommandResult {
     if !client.is_logged_in() {
         return CommandResult {
@@ -410,6 +470,9 @@ fn handle_cmd_cwd(client: &Client, path: &str) -> CommandResult {
     }
 }
 
+/// Handles the PWD command: returns the current working directory to the client.
+///
+/// Returns the directory path on success; error message otherwise.
 fn handle_cmd_pwd(client: &Client) -> CommandResult {
     if !client.is_logged_in() {
         return CommandResult {
@@ -432,12 +495,14 @@ fn handle_cmd_pwd(client: &Client) -> CommandResult {
     }
 }
 
-// Handle the PASV command to enter passive mode
-// This function binds a socket for the data connection
-// Does not return a data stream, just the socket address
+/// Handles the PASV command: sets up passive FTP mode.
+///
+/// Binds a listener on an available data socket, updates the registry,
+/// and returns the PASV response with socket info to the client.
 fn handle_cmd_pasv(client: &mut Client, channel_registry: &mut ChannelRegistry) -> CommandResult {
     let client_addr = *client.client_addr().unwrap();
-    // Step 1: Check if the client is logged in
+
+    // Ensure client is authenticated
     if !client.is_logged_in() {
         return CommandResult {
             status: CommandStatus::Failure("Not logged in".into()),
@@ -446,7 +511,7 @@ fn handle_cmd_pasv(client: &mut Client, channel_registry: &mut ChannelRegistry) 
         };
     }
 
-    // Step 2: Prevent duplicate initialization of the data channel
+    // Prevent duplicate data channel initialization
     if channel_registry.contains(&client_addr) {
         return CommandResult {
             status: CommandStatus::Failure("Data channel already initialized".into()),
@@ -455,12 +520,11 @@ fn handle_cmd_pasv(client: &mut Client, channel_registry: &mut ChannelRegistry) 
         };
     }
 
-    // Step 3: Find the next available data socket address
+    // Find next available socket for data connection
     if let Some(data_socket) = channel_registry.next_available_socket() {
-        // Step 4: Attempt to bind listener to the socket
         match TcpListener::bind(data_socket) {
             Ok(listener) => {
-                // Step 5: Set listener to non-blocking
+                // Set listener to non-blocking to avoid blocking main thread
                 if let Err(e) = listener.set_nonblocking(true) {
                     error!("Failed to set non-blocking mode: {}", e);
                     return CommandResult {
@@ -470,26 +534,24 @@ fn handle_cmd_pasv(client: &mut Client, channel_registry: &mut ChannelRegistry) 
                     };
                 }
 
-                // Step 6: Update channel registry with new ChannelEntry and client
+                // Create new channel entry for data connection
                 let mut entry = ChannelEntry::default();
-
                 entry.set_data_socket(Some(data_socket));
                 entry.set_data_stream(None);
                 entry.set_listener(Some(listener.try_clone().unwrap()));
 
+                // Insert into registry and update client state
                 channel_registry.insert(client_addr, entry);
                 client.set_data_channel_init(true);
 
-                // Step 8: Log client and bound socket info clearly
                 info!(
                     "Client {} bound to data socket {} in PASV mode",
                     client_addr, data_socket
                 );
 
-                // Step 9: Format PASV response in ip:port format
+                // Format PASV reply with socket information
                 let response = format!("227 Entering Passive Mode ({})\r\n", data_socket);
 
-                // Step 10: Return success result
                 return CommandResult {
                     status: CommandStatus::Success,
                     message: Some(response),
@@ -507,7 +569,7 @@ fn handle_cmd_pasv(client: &mut Client, channel_registry: &mut ChannelRegistry) 
         }
     }
 
-    // Step 11: No available port in range
+    // No ports available in the allowed range
     CommandResult {
         status: CommandStatus::Failure("No available port".into()),
         message: Some("425 Can't open data connection\r\n".into()),
@@ -515,6 +577,9 @@ fn handle_cmd_pasv(client: &mut Client, channel_registry: &mut ChannelRegistry) 
     }
 }
 
+/// Handles the PORT command: sets up active FTP mode.
+///
+/// Parses client-provided address, binds listener, and updates data channel registry.
 fn handle_cmd_port(
     client: &mut Client,
     channel_registry: &mut ChannelRegistry,
@@ -522,7 +587,7 @@ fn handle_cmd_port(
 ) -> CommandResult {
     let client_addr = *client.client_addr().unwrap();
 
-    // Step 1: Check if the client is logged in
+    // Check authentication
     if !client.is_logged_in() {
         return CommandResult {
             status: CommandStatus::Failure("Not logged in".into()),
@@ -531,80 +596,79 @@ fn handle_cmd_port(
         };
     }
 
-    // Step 2: Parse the provided address
-    match SocketAddr::from_str(addr) {
-        Ok(data_socket) if data_socket.port() != 0 => {
-            // Step 3: Check if the socket is already in use by another client
-            if channel_registry.is_socket_taken(&data_socket) {
-                error!(
-                    "PORT command rejected: address {} already in use by another client",
-                    data_socket
-                );
+    // Parse the provided address string to SocketAddr
+    let parsed_addr = match SocketAddr::from_str(addr) {
+        Ok(addr) => addr,
+        Err(_) => {
+            return CommandResult {
+                status: CommandStatus::Failure("Invalid address".into()),
+                message: Some("501 Syntax error in parameters or arguments\r\n".into()),
+                data: None,
+            };
+        }
+    };
+
+    // Check if port is within allowed range
+    if parsed_addr.port() < 2000 {
+        return CommandResult {
+            status: CommandStatus::Failure("Port out of range".into()),
+            message: Some("501 Port number must be between 2000 and 65535\r\n".into()),
+            data: None,
+        };
+    }
+
+    // Prevent duplicate data channel initialization
+    if channel_registry.contains(&client_addr) {
+        return CommandResult {
+            status: CommandStatus::Failure("Data channel already initialized".into()),
+            message: Some("425 Data connection already initialized\r\n".into()),
+            data: None,
+        };
+    }
+
+    // Bind TcpListener on client-specified address
+    match TcpListener::bind(parsed_addr) {
+        Ok(listener) => {
+            if let Err(e) = listener.set_nonblocking(true) {
+                error!("Failed to set non-blocking mode: {}", e);
                 return CommandResult {
-                    status: CommandStatus::Failure("Address in use".into()),
-                    message: Some("425 Address already in use\r\n".into()),
+                    status: CommandStatus::Failure("Failed to configure listener".into()),
+                    message: Some("425 Can't open data connection\r\n".into()),
                     data: None,
                 };
             }
 
-            // Step 4: Attempt to bind listener to the socket
-            match TcpListener::bind(data_socket) {
-                Ok(listener) => {
-                    // Step 5: Set listener to non-blocking
-                    if let Err(e) = listener.set_nonblocking(true) {
-                        error!("Failed to set non-blocking mode: {}", e);
-                        return CommandResult {
-                            status: CommandStatus::Failure("Failed to configure listener".into()),
-                            message: Some("425 Can't open data connection\r\n".into()),
-                            data: None,
-                        };
-                    }
+            let mut entry = ChannelEntry::default();
+            entry.set_data_socket(Some(parsed_addr));
+            entry.set_data_stream(None);
+            entry.set_listener(Some(listener.try_clone().unwrap()));
 
-                    // Step 6: Update client state and registry
-                    let mut entry = ChannelEntry::default();
+            channel_registry.insert(client_addr, entry);
+            client.set_data_channel_init(true);
 
-                    entry.set_data_socket(Some(data_socket));
-                    entry.set_data_stream(None);
-                    entry.set_listener(Some(listener.try_clone().unwrap()));
-                    channel_registry.insert(client_addr, entry);
-                    client.set_data_channel_init(true);
+            info!(
+                "Client {} bound to data socket {} in PORT mode",
+                client_addr, parsed_addr
+            );
 
-                    // Step 7: Log success
-                    info!(
-                        "Client {} bound to data socket {} in PORT mode",
-                        client_addr, data_socket
-                    );
-
-                    // Step 8: Return success
-                    CommandResult {
-                        status: CommandStatus::Success,
-                        message: Some("200 PORT command successful\r\n".into()),
-                        data: None,
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to bind to {}: {}", data_socket, e);
-                    CommandResult {
-                        status: CommandStatus::Failure("Port binding failed".into()),
-                        message: Some("425 Can't open data connection\r\n".into()),
-                        data: None,
-                    }
-                }
+            CommandResult {
+                status: CommandStatus::Success,
+                message: Some("200 PORT command successful\r\n".into()),
+                data: None,
             }
         }
-
-        // Step 9: Invalid or malformed input
-        _ => {
-            error!("Invalid PORT address received from client {}", client_addr);
+        Err(e) => {
+            error!("Failed to bind to {}: {}", parsed_addr, e);
             CommandResult {
-                status: CommandStatus::Failure("Invalid port".into()),
-                message: Some("501 Invalid port\r\n".into()),
+                status: CommandStatus::Failure("Port binding failed".into()),
+                message: Some("425 Can't open data connection\r\n".into()),
                 data: None,
             }
         }
     }
 }
 
+/// Handles the custom RAX command: returns a fixed success message.
 fn handle_cmd_rax() -> CommandResult {
     CommandResult {
         status: CommandStatus::Success,
@@ -613,6 +677,7 @@ fn handle_cmd_rax() -> CommandResult {
     }
 }
 
+/// Handles unknown or unsupported commands: returns error response.
 fn handle_cmd_unknown() -> CommandResult {
     CommandResult {
         status: CommandStatus::Failure("Unknown command".into()),
