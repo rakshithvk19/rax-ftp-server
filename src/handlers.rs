@@ -16,6 +16,8 @@ use std::env;
 use std::fs;
 use std::net::{SocketAddr, TcpListener};
 use std::str::FromStr;
+use std::thread;
+use std::time::Duration;
 
 /// Dispatches a received FTP command to its corresponding handler.
 ///
@@ -44,7 +46,7 @@ pub fn handle_command(
         Command::STOR(filename) => handle_cmd_stor(client, filename, channel_registry),
         Command::DEL(filename) => handle_cmd_del(client, filename),
         Command::CWD(path) => handle_cmd_cwd(client, path),
-        Command::PASV() => handle_cmd_pasv(client, channel_registry),
+        Command::PASV => handle_cmd_pasv(client, channel_registry),
         Command::PORT(addr) => handle_cmd_port(client, channel_registry, addr),
         Command::RAX => handle_cmd_rax(),
         Command::UNKNOWN => handle_cmd_unknown(),
@@ -127,7 +129,7 @@ fn handle_cmd_pass(client: &mut Client, password: &str) -> CommandResult {
 /// Handles the LIST command: provides directory listing to logged-in clients.
 ///
 /// Reads the `./test_dir` directory and returns file names in the response data.
-fn handle_cmd_list(client: &mut Client) -> CommandResult {
+fn handle_cmd_list(client: &Client) -> CommandResult {
     if !client.is_logged_in() {
         return CommandResult {
             status: CommandStatus::Failure("Not logged in".into()),
@@ -136,31 +138,40 @@ fn handle_cmd_list(client: &mut Client) -> CommandResult {
         };
     }
 
-    let client_addr = client.client_addr().unwrap();
-    info!("Client {} requested directory listing", client_addr);
-
-    match fs::read_dir("./test_dir") {
-        Ok(entries) => {
-            let mut file_list = vec![];
-
-            for entry in entries.flatten() {
-                file_list.push(entry.file_name().to_string_lossy().to_string());
+    let retries = 3;
+    for attempt in 1..=retries {
+        match fs::read_dir("./test_dir") {
+            Ok(entries) => {
+                let mut file_list = vec![];
+                for entry in entries.flatten() {
+                    file_list.push(entry.file_name().to_string_lossy().to_string());
+                }
+                return CommandResult {
+                    status: CommandStatus::Success,
+                    message: Some("226 Directory listing successful\r\n".into()),
+                    data: Some(CommandData::DirectoryListing(file_list)),
+                };
             }
-
-            CommandResult {
-                status: CommandStatus::Success,
-                message: Some("226 Transfer complete\r\n".into()),
-                data: Some(CommandData::DirectoryListing(file_list)),
+            Err(e) => {
+                if attempt < retries && e.kind() == std::io::ErrorKind::PermissionDenied {
+                    thread::sleep(Duration::from_millis(100 * attempt as u64));
+                    continue;
+                } else {
+                    error!("Failed to list directory: {}", e);
+                    return CommandResult {
+                        status: CommandStatus::Failure(e.to_string()),
+                        message: Some("550 Failed to list directory\r\n".into()),
+                        data: None,
+                    };
+                }
             }
         }
-        Err(e) => {
-            error!("Failed to read directory: {}", e);
-            CommandResult {
-                status: CommandStatus::Failure("550 Failed to list directory\r\n".into()),
-                message: Some("550 Failed to list directory\r\n".into()),
-                data: None,
-            }
-        }
+    }
+
+    CommandResult {
+        status: CommandStatus::Failure("Unexpected error".into()),
+        message: Some("550 Internal server error\r\n".into()),
+        data: None,
     }
 }
 
@@ -424,6 +435,7 @@ fn handle_cmd_del(client: &mut Client, filename: &str) -> CommandResult {
             data: None,
         };
     }
+
     if filename.is_empty() {
         return CommandResult {
             status: CommandStatus::Failure("Missing filename".into()),
@@ -431,17 +443,45 @@ fn handle_cmd_del(client: &mut Client, filename: &str) -> CommandResult {
             data: None,
         };
     }
-    match fs::remove_file(filename) {
-        Ok(_) => CommandResult {
-            status: CommandStatus::Success,
-            message: Some("250 File deleted successfully\r\n".into()),
+
+    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
+        return CommandResult {
+            status: CommandStatus::Failure("Invalid filename".into()),
+            message: Some("550 Invalid filename\r\n".into()),
             data: None,
-        },
-        Err(e) => CommandResult {
-            status: CommandStatus::Failure(e.to_string()),
-            message: Some("550 Failed to delete file\r\n".into()),
-            data: None,
-        },
+        };
+    }
+
+    let retries = 3;
+    for attempt in 1..=retries {
+        match fs::remove_file(filename) {
+            Ok(_) => {
+                return CommandResult {
+                    status: CommandStatus::Success,
+                    message: Some("250 File deleted successfully\r\n".into()),
+                    data: None,
+                };
+            }
+            Err(e) => {
+                if attempt < retries && e.kind() == std::io::ErrorKind::PermissionDenied {
+                    thread::sleep(Duration::from_millis(100 * attempt as u64));
+                    continue;
+                } else {
+                    error!("Failed to delete file '{}': {}", filename, e);
+                    return CommandResult {
+                        status: CommandStatus::Failure(e.to_string()),
+                        message: Some("550 Failed to delete file\r\n".into()),
+                        data: None,
+                    };
+                }
+            }
+        }
+    }
+
+    CommandResult {
+        status: CommandStatus::Failure("Unexpected error".into()),
+        message: Some("550 Internal server error\r\n".into()),
+        data: None,
     }
 }
 
@@ -456,17 +496,45 @@ fn handle_cmd_cwd(client: &Client, path: &str) -> CommandResult {
             data: None,
         };
     }
-    match env::set_current_dir(path) {
-        Ok(_) => CommandResult {
-            status: CommandStatus::Success,
-            message: Some("250 Directory changed successfully\r\n".into()),
+
+    if path.is_empty() {
+        return CommandResult {
+            status: CommandStatus::Failure("Missing directory path".into()),
+            message: Some("501 Syntax error in parameters or arguments\r\n".into()),
             data: None,
-        },
-        Err(e) => CommandResult {
-            status: CommandStatus::Failure(e.to_string()),
-            message: Some("550 Failed to change directory\r\n".into()),
-            data: None,
-        },
+        };
+    }
+
+    let retries = 3;
+    for attempt in 1..=retries {
+        match env::set_current_dir(path) {
+            Ok(_) => {
+                return CommandResult {
+                    status: CommandStatus::Success,
+                    message: Some("250 Directory changed successfully\r\n".into()),
+                    data: None,
+                };
+            }
+            Err(e) => {
+                if attempt < retries && e.kind() == std::io::ErrorKind::PermissionDenied {
+                    thread::sleep(Duration::from_millis(100 * attempt as u64));
+                    continue;
+                } else {
+                    error!("Failed to change directory to '{}': {}", path, e);
+                    return CommandResult {
+                        status: CommandStatus::Failure(e.to_string()),
+                        message: Some("550 Failed to change directory\r\n".into()),
+                        data: None,
+                    };
+                }
+            }
+        }
+    }
+
+    CommandResult {
+        status: CommandStatus::Failure("Unexpected error".into()),
+        message: Some("550 Internal server error\r\n".into()),
+        data: None,
     }
 }
 
@@ -481,17 +549,21 @@ fn handle_cmd_pwd(client: &Client) -> CommandResult {
             data: None,
         };
     }
+
     match env::current_dir() {
         Ok(path) => CommandResult {
             status: CommandStatus::Success,
             message: Some(format!("257 \"{}\"\r\n", path.display())),
             data: None,
         },
-        Err(e) => CommandResult {
-            status: CommandStatus::Failure(e.to_string()),
-            message: Some("550 Failed to get current directory\r\n".into()),
-            data: None,
-        },
+        Err(e) => {
+            error!("Failed to get current directory: {}", e);
+            CommandResult {
+                status: CommandStatus::Failure(e.to_string()),
+                message: Some("550 Failed to get current directory\r\n".into()),
+                data: None,
+            }
+        }
     }
 }
 
@@ -596,23 +668,34 @@ fn handle_cmd_port(
         };
     }
 
-    // Parse the provided address string to SocketAddr
+    // Parse the address string to SocketAddr
     let parsed_addr = match SocketAddr::from_str(addr) {
         Ok(addr) => addr,
         Err(_) => {
             return CommandResult {
-                status: CommandStatus::Failure("Invalid address".into()),
-                message: Some("501 Syntax error in parameters or arguments\r\n".into()),
+                status: CommandStatus::Failure("Invalid address format".into()),
+                message: Some("501 Invalid address format. Use IP::PORT\r\n".into()),
                 data: None,
             };
         }
     };
 
-    // Check if port is within allowed range
-    if parsed_addr.port() < 2000 {
+    // Validate IP matches client (for security)
+    if parsed_addr.ip() != client_addr.ip() {
+        return CommandResult {
+            status: CommandStatus::Failure("IP mismatch".into()),
+            message: Some("501 IP address in PORT must match control connection\r\n".into()),
+            data: None,
+        };
+    }
+
+    // Validate port range
+    let port = parsed_addr.port();
+
+    if port < 1024 {
         return CommandResult {
             status: CommandStatus::Failure("Port out of range".into()),
-            message: Some("501 Port number must be between 2000 and 65535\r\n".into()),
+            message: Some("501 Port must be between 1024 and 65535\r\n".into()),
             data: None,
         };
     }
@@ -627,7 +710,7 @@ fn handle_cmd_port(
     }
 
     // Bind TcpListener on client-specified address
-    match TcpListener::bind(parsed_addr) {
+    match std::net::TcpListener::bind(parsed_addr) {
         Ok(listener) => {
             if let Err(e) = listener.set_nonblocking(true) {
                 error!("Failed to set non-blocking mode: {}", e);

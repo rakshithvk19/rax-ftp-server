@@ -5,6 +5,7 @@
 //! Facilitates allocation and lifecycle management of data connections used
 //! for file transfers (e.g., STOR, RETR, LIST).
 
+use log::warn;
 use std::collections::HashMap;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 
@@ -109,20 +110,21 @@ impl ChannelRegistry {
 
     /// Inserts or replaces the data channel entry associated with the given client address.
     ///
-    /// # Arguments
-    /// * `addr` - The client socket address (control connection) as key.
-    /// * `entry` - The ChannelEntry containing data channel state for this client.
+    /// If the provided data socket is already in use by another client, it logs a warning and skips insertion.
     pub fn insert(&mut self, addr: SocketAddr, entry: ChannelEntry) {
+        if let Some(socket) = entry.data_socket {
+            if self.is_socket_taken(&socket) {
+                warn!(
+                    "Attempted to insert a data socket already in use: {}",
+                    socket
+                );
+                return;
+            }
+        }
         self.registry.insert(addr, entry);
     }
 
     /// Removes and returns the data channel entry for a given client address, if any.
-    ///
-    /// # Arguments
-    /// * `addr` - Client socket address key.
-    ///
-    /// # Returns
-    /// Optionally returns the removed ChannelEntry.
     pub fn remove(&mut self, addr: &SocketAddr) -> Option<ChannelEntry> {
         self.registry.remove(addr)
     }
@@ -149,21 +151,10 @@ impl ChannelRegistry {
 
     /// Attempts to find the next available socket address in the configured PASV port range
     /// that is not currently assigned to any client's data socket.
-    ///
-    /// # Returns
-    /// An available `SocketAddr` on localhost with an unused port, or `None` if none are free.
     pub fn next_available_socket(&self) -> Option<SocketAddr> {
         for port in Self::DATA_PORT_RANGE {
-            // Construct localhost address with candidate port
             let data_socket: SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
-
-            // Check if this port is already in use by any channel entry's data_socket
-            let in_use = self
-                .registry
-                .values()
-                .any(|entry| entry.data_socket == Some(data_socket));
-
-            if !in_use {
+            if !self.is_socket_taken(&data_socket) {
                 return Some(data_socket);
             }
         }
@@ -171,12 +162,6 @@ impl ChannelRegistry {
     }
 
     /// Checks if the given socket address is already assigned as a data socket for any client.
-    ///
-    /// # Arguments
-    /// * `addr` - Socket address to check.
-    ///
-    /// # Returns
-    /// `true` if the address is in use, `false` otherwise.
     pub fn is_socket_taken(&self, addr: &SocketAddr) -> bool {
         self.registry
             .values()

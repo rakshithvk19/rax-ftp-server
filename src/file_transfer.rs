@@ -6,157 +6,190 @@
 //! status codes and messages.
 
 use crate::command::CommandStatus;
-use log::error;
+use log::{error, warn};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::thread;
+use std::time::Duration;
+
+const MAX_RETRIES: usize = 3;
+
+/// Sanitizes filename input to prevent directory traversal attacks.
+fn sanitize_filename(filename: &str) -> Option<String> {
+    if filename.contains("..")
+        || filename.contains('\0')
+        || filename.contains('/')
+        || filename.contains('\\')
+    {
+        warn!("Rejected suspicious filename: {}", filename);
+        None
+    } else {
+        Some(filename.trim().to_string())
+    }
+}
 
 /// Handles uploading a file from the client to the server.
-///
-/// This function reads data from the provided TCP data stream and writes it
-/// into a file specified by `filename`. It reads data in chunks of 1024 bytes
-/// until EOF is reached or an error occurs. Appropriate FTP command status
-/// codes and messages are returned based on success or failure.
-///
-/// # Arguments
-///
-/// * `data_stream` - A TCP stream representing the data connection from client.
-/// * `filename` - The path where the uploaded file will be saved on the server.
-///
-/// # Returns
-///
-/// * `Ok((CommandStatus, &str))` - On successful upload, returns FTP success status and message.
-/// * `Err((CommandStatus, &str))` - On failure, returns FTP failure status and message.
-///
-/// # Errors
-///
-/// * Returns `550 Requested action not taken` if the file cannot be created.
-/// * Returns `426 Connection closed; transfer aborted` if the data stream read fails.
-/// * Returns `450 Requested file action not taken` if the file flush operation fails.
 pub fn handle_file_upload(
     mut data_stream: TcpStream,
     filename: &str,
 ) -> Result<(CommandStatus, &'static str), (CommandStatus, &'static str)> {
-    // Attempt to create the target file for writing the uploaded data.
-    match File::create(filename) {
+    let sanitized = match sanitize_filename(filename) {
+        Some(name) => name,
+        None => {
+            return Err((
+                CommandStatus::Failure(
+                    "550 Invalid filename
+"
+                    .into(),
+                ),
+                "550 Invalid filename
+",
+            ));
+        }
+    };
+
+    match File::create(&sanitized) {
         Ok(mut file) => {
             let mut buffer = [0; 1024];
-
-            // Continuously read from the data stream until EOF (0 bytes read).
             loop {
-                match data_stream.read(&mut buffer) {
-                    Ok(0) => break, // End of file / stream
-                    Ok(n) => {
-                        // Write the received data chunk into the file.
-                        if let Err(e) = file.write_all(&buffer[..n]) {
-                            error!("Failed to write to file {}: {}", filename, e);
+                let mut retries = 0;
+                let n = loop {
+                    match data_stream.read(&mut buffer) {
+                        Ok(0) => break 0, // EOF
+                        Ok(n) => break n,
+                        Err(e) if retries < MAX_RETRIES => {
+                            warn!("Transient read error: {}. Retrying...", e);
+                            retries += 1;
+                            thread::sleep(Duration::from_millis(100));
+                        }
+                        Err(e) => {
+                            error!("Read failure: {}", e);
                             return Err((
-                                CommandStatus::Failure("550 Requested action not taken\r\n".into()),
-                                "550 Requested action not taken\r\n",
+                                CommandStatus::Failure(
+                                    "426 Connection closed; transfer aborted
+"
+                                    .into(),
+                                ),
+                                "426 Connection closed; transfer aborted
+",
                             ));
                         }
                     }
-                    Err(e) => {
-                        error!("Failed to read from data stream: {}", e);
-                        return Err((
-                            CommandStatus::Failure("426 Connection closed; transfer aborted\r\n".into()),
-                            "426 Connection closed; transfer aborted\r\n",
-                        ));
-                    }
+                };
+                if n == 0 {
+                    break;
+                }
+
+                if let Err(e) = file.write_all(&buffer[..n]) {
+                    error!("Failed to write to {}: {}", sanitized, e);
+                    return Err((
+                        CommandStatus::Failure(
+                            "550 Requested action not taken
+"
+                            .into(),
+                        ),
+                        "550 Requested action not taken
+",
+                    ));
                 }
             }
 
-            // Flush buffered data to disk before closing the file.
             if file.flush().is_ok() {
-                Ok((CommandStatus::Success, "226 Transfer complete\r\n"))
+                Ok((
+                    CommandStatus::Success,
+                    "226 Transfer complete
+",
+                ))
             } else {
                 Err((
-                    CommandStatus::Failure("450 Requested file action not taken\r\n".into()),
-                    "450 Requested file action not taken\r\n",
+                    CommandStatus::Failure(
+                        "450 Requested file action not taken
+"
+                        .into(),
+                    ),
+                    "450 Requested file action not taken
+",
                 ))
             }
         }
         Err(e) => {
-            error!("Failed to create file {}: {}", filename, e);
+            error!("File create failed for {}: {}", sanitized, e);
             Err((
-                CommandStatus::Failure("550 Requested action not taken\r\n".into()),
-                "550 Requested action not taken\r\n",
+                CommandStatus::Failure("550 Requested action not taken".into()),
+                "550 Requested action not taken",
             ))
         }
     }
 }
 
 /// Handles downloading a file from the server to the client.
-///
-/// This function reads the contents of the specified file and writes
-/// it to the provided TCP data stream in chunks of 1024 bytes until
-/// the entire file is sent or an error occurs. Appropriate FTP
-/// command status codes and messages are returned based on success or failure.
-///
-/// # Arguments
-///
-/// * `data_stream` - A TCP stream representing the data connection to client.
-/// * `filename` - The path of the file to be downloaded from the server.
-///
-/// # Returns
-///
-/// * `Ok((CommandStatus, &str))` - On successful download, returns FTP success status and message.
-/// * `Err((CommandStatus, &str))` - On failure, returns FTP failure status and message.
-///
-/// # Errors
-///
-/// * Returns `550 Failed to open file` if the file cannot be opened.
-/// * Returns `451 Requested action aborted` if file reading fails.
-/// * Returns `426 Connection closed; transfer aborted` if writing to the data stream fails.
-/// * Returns `450 Requested file action not taken` if flushing the data stream fails.
 pub fn handle_file_download(
     mut data_stream: TcpStream,
     filename: &str,
 ) -> Result<(CommandStatus, &'static str), (CommandStatus, &'static str)> {
-    // Attempt to open the file for reading
-    match File::open(filename) {
+    let sanitized = match sanitize_filename(filename) {
+        Some(name) => name,
+        None => {
+            return Err((
+                CommandStatus::Failure("550 Invalid filename".into()),
+                "550 Invalid filename",
+            ));
+        }
+    };
+
+    match File::open(&sanitized) {
         Ok(mut file) => {
             let mut buffer = [0; 1024];
-
-            // Continuously read from the file and write to the data stream until EOF
             loop {
-                match file.read(&mut buffer) {
-                    Ok(0) => break, // EOF reached
-                    Ok(n) => {
-                        // Write the chunk read from the file into the data stream
-                        if let Err(e) = data_stream.write_all(&buffer[..n]) {
-                            error!("Failed to write to data stream: {}", e);
+                let n = match file.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(n) => n,
+                    Err(e) => {
+                        error!("Read error on {}: {}", sanitized, e);
+                        return Err((
+                            CommandStatus::Failure("451 Requested action aborted".into()),
+                            "451 Requested action aborted",
+                        ));
+                    }
+                };
+
+                let mut retries = 0;
+                loop {
+                    match data_stream.write_all(&buffer[..n]) {
+                        Ok(_) => break,
+                        Err(e) if retries < MAX_RETRIES => {
+                            warn!("Transient write error: {}. Retrying...", e);
+                            retries += 1;
+                            thread::sleep(Duration::from_millis(100));
+                        }
+                        Err(e) => {
+                            error!("Write failure to data stream: {}", e);
                             return Err((
-                                CommandStatus::Failure("426 Connection closed; transfer aborted\r\n".into()),
-                                "426 Connection closed; transfer aborted\r\n",
+                                CommandStatus::Failure(
+                                    "426 Connection closed; transfer aborted".into(),
+                                ),
+                                "426 Connection closed; transfer aborted",
                             ));
                         }
-                    }
-                    Err(e) => {
-                        error!("Failed to read from file {}: {}", filename, e);
-                        return Err((
-                            CommandStatus::Failure("451 Requested action aborted\r\n".into()),
-                            "451 Requested action aborted\r\n",
-                        ));
                     }
                 }
             }
 
-            // Flush the data stream to ensure all data is sent
             if data_stream.flush().is_ok() {
-                Ok((CommandStatus::Success, "226 Transfer complete\r\n"))
+                Ok((CommandStatus::Success, "226 Transfer complete"))
             } else {
                 Err((
-                    CommandStatus::Failure("450 Requested file action not taken\r\n".into()),
-                    "450 Requested file action not taken\r\n",
+                    CommandStatus::Failure("450 Requested file action not taken".into()),
+                    "450 Requested file action not taken",
                 ))
             }
         }
         Err(e) => {
-            error!("Failed to open file {}: {}", filename, e);
+            error!("Failed to open file {}: {}", sanitized, e);
             Err((
-                CommandStatus::Failure("550 Failed to open file\r\n".into()),
-                "550 Failed to open file\r\n",
+                CommandStatus::Failure("550 Failed to open file".into()),
+                "550 Failed to open file",
             ))
         }
     }
