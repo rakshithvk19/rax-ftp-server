@@ -34,20 +34,4 @@ pub mod file_transfer;
 pub mod handlers;
 
 /// Core server implementation - private module managing listener, event loop, etc.
-mod server;
-
-/// Starts the FTP server by creating a new server instance and running it.
-///
-/// This function serves as the external entry point to launch the FTP server.
-///
-/// # Example
-/// ```
-/// ftp_server::start_server();
-/// ```
-pub fn start_server() {
-    // Instantiate a new server object
-    let server = server::Server::new();
-
-    // Start the server event loop, listening for client connections
-    server.start();
-}
+pub mod server;

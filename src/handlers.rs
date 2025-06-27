@@ -53,6 +53,18 @@ pub fn handle_command(
     }
 }
 
+pub fn handle_auth_command(client: &mut Client, command: &Command) -> CommandResult{
+    match command {
+        Command::USER(username) => handle_cmd_user(client, username),
+        Command::PASS(password) => handle_cmd_pass(client, password),
+        _ => CommandResult {
+            status: CommandStatus::Failure("Authentication required".into()),
+            message: Some("530 Please login with USER and PASS\r\n".into()),
+            data: None,
+        },
+    }
+}
+
 /// Handles the QUIT command: logs out the client and signals connection close.
 fn handle_cmd_quit(client: &mut Client) -> CommandResult {
     client.logout();

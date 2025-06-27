@@ -1,14 +1,14 @@
-// main.rs
-// Entry point for the Rax FTP Server application.
-// Initializes logging and starts the FTP server.
+use env_logger;
+use log::info;
+use rax_ftp_server::server::Server;
 
-use rax_ftp_server::start_server;
-
-fn main() {
-    // Initialize the logger from environment variables (e.g., RUST_LOG)
-    // This enables logging throughout the application, useful for debugging and monitoring.
+#[tokio::main]
+async fn main() {
+    // Initialize the logger (env_logger picks up RUST_LOG environment variable)
     env_logger::init();
 
-    // Start the FTP server event loop
-    start_server();
+    info!("Launching FTP server...");
+
+    let server = Server::new().await;
+    server.start().await;
 }
