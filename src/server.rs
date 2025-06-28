@@ -1,4 +1,3 @@
-// server.rs
 use log::{error, info, warn};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -13,25 +12,16 @@ use crate::client_handler::handle_client;
 use crate::command::parse_command;
 use crate::handlers::handle_auth_command;
 
-/// The main FTP server struct that manages TCP listener, client registry,
-/// and channel registry. It accepts incoming connections and spawns
-/// handler threads to process FTP client sessions.
+const COMMAND_SOCKET: &str = "127.0.0.1:2121";
+const MAX_CLIENTS: usize = 10;
+
 pub struct Server {
     client_registry: Arc<Mutex<HashMap<SocketAddr, Client>>>,
     channel_registry: Arc<Mutex<ChannelRegistry>>,
     listener: TcpListener,
 }
 
-/// Default control socket address for FTP command communication.
-const COMMAND_SOCKET: &str = "127.0.0.1:2121";
-
-/// Maximum number of clients that can connect simultaneously.
-const MAX_CLIENTS: usize = 10;
-
 impl Server {
-    /// Creates a new FTP server instance and binds the TCP listener.
-    /// Logs detailed error and panics on failure to bind.
-    /// Binds TCP listener to the specified command socket address.
     pub async fn new() -> Self {
         let listener = match TcpListener::bind(COMMAND_SOCKET).await {
             Ok(listener) => {
@@ -40,10 +30,7 @@ impl Server {
             }
             Err(e) => {
                 error!("Failed to bind to {}: {}", COMMAND_SOCKET, e);
-                panic!(
-                    "Server startup failed on socket {} due to : {}",
-                    COMMAND_SOCKET, e
-                );
+                panic!("Server startup failed on socket {}: {}", COMMAND_SOCKET, e);
             }
         };
 
@@ -54,43 +41,26 @@ impl Server {
         }
     }
 
-    async fn accept_clients(&self) {
+    pub async fn start(&self) {
+        info!(
+            "Starting Rax FTP server on {} (max {} clients)",
+            COMMAND_SOCKET, MAX_CLIENTS
+        );
+
         loop {
             match self.listener.accept().await {
-                Ok((cmd_stream, client_addr)) => {
-                    // Check if the client limit is reached
-                    let client_count = {
-                        let clients = self.client_registry.lock().await;
-                        clients.len()
-                    };
+                Ok((stream, addr)) => {
+                    let client_registry = Arc::clone(&self.client_registry);
+                    let channel_registry = Arc::clone(&self.channel_registry);
 
-                    if client_count >= MAX_CLIENTS {
-                        warn!(
-                            "Max clients ({}) reached. Rejecting connection from {}",
-                            MAX_CLIENTS, client_addr
-                        );
-                        let mut stream = cmd_stream;
-                        let _ = stream
-                            .write_all(b"421 Too many connections. Server busy.\r\n")
-                            .await;
-                        let _ = stream.flush().await;
-                        continue;
-                    }
-
-                    // Authenticate client and register on success
-                    match self
-                        .authenticate_and_register_client(cmd_stream, client_addr)
-                        .await
-                    {
-                        Ok(stream) => {
-                            self.spawn_handler(stream, client_addr);
+                    // Spawn a task for each client so accept loop doesn't block
+                    tokio::spawn(async move {
+                        if let Err(e) =
+                            handle_new_client(stream, addr, client_registry, channel_registry).await
+                        {
+                            warn!("Failed to handle client {}: {}", addr, e);
                         }
-                        Err(e) => {
-                            warn!("Authentication failed for {}: {}", client_addr, e);
-                            // Connection will be dropped here, closing stream
-                            continue;
-                        }
-                    }
+                    });
                 }
                 Err(e) => {
                     error!("Error accepting connection: {}", e);
@@ -98,91 +68,72 @@ impl Server {
             }
         }
     }
+}
 
-    /// Authenticate client using line-based reading and register client upon success.
-    ///
-    /// Returns the TcpStream to continue handling after authentication.
-    async fn authenticate_and_register_client(
-        &self,
-        stream: TcpStream,
-        client_addr: SocketAddr,
-    ) -> Result<TcpStream, std::io::Error> {
-        let mut reader = BufReader::new(stream);
-        let mut line = String::new();
+/// Handles a new client: greets, authenticates, registers, and spawns session handler.
+async fn handle_new_client(
+    stream: TcpStream,
+    client_addr: SocketAddr,
+    client_registry: Arc<Mutex<HashMap<SocketAddr, Client>>>,
+    channel_registry: Arc<Mutex<ChannelRegistry>>,
+) -> Result<(), std::io::Error> {
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
 
-        let mut client = Client::default();
+    // Send greeting
+    reader
+        .get_mut()
+        .write_all(b"220 Welcome to RAX FTP Server\r\n")
+        .await?;
 
-        reader
-            .get_mut()
-            .write_all(b"220 Welcome to RAX FTP\r\n")
-            .await?;
+    let mut client = Client::default();
 
-        loop {
-            line.clear();
-            let n = reader.read_line(&mut line).await?;
-            if n == 0 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::ConnectionAborted,
-                    "Client disconnected during auth",
-                ));
-            }
-
-            let cmd = parse_command(&line);
-            let res = handle_auth_command(&mut client, &cmd);
-
-            if let Some(msg) = res.message {
-                reader.get_mut().write_all(msg.as_bytes()).await?;
-            }
-
-            if client.is_logged_in() {
-                // Register the client in the registry now that authentication succeeded
-                {
-                    let mut clients = self.client_registry.lock().await;
-                    client.set_client_addr(Some(client_addr));
-                    clients.insert(client_addr, client);
-                    info!(
-                        "New authenticated client: {} ({}/{} clients)",
-                        client_addr,
-                        clients.len(),
-                        MAX_CLIENTS
-                    );
-                }
-
-                // Extract the TcpStream from BufReader to pass on
-                let stream = reader.into_inner();
-                break Ok(stream);
-            }
+    loop {
+        line.clear();
+        let n = reader.read_line(&mut line).await?;
+        if n == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionAborted,
+                "Client disconnected during authentication",
+            ));
         }
-    }
 
-    // TODO: Call this method on QUIT command or disconnect
-    async fn deregister_client(&self, client_addr: SocketAddr) {
-        let mut clients = self.client_registry.lock().await;
-        clients.remove(&client_addr);
-    }
+        let command = parse_command(&line);
+        let result = handle_auth_command(&mut client, &command);
 
-    /// Spawns an async task to manage the client's FTP session.
-    /// Logs and removes the client from the registry if the task panics.
-    fn spawn_handler(&self, cmd_stream: TcpStream, client_addr: SocketAddr) {
-        let client_registry_ref = Arc::clone(&self.client_registry);
-        let channel_registry_ref = Arc::clone(&self.channel_registry);
+        if let Some(msg) = result.message {
+            reader.get_mut().write_all(msg.as_bytes()).await?;
+        }
 
-        tokio::spawn(async move {
-            handle_client(
-                cmd_stream,
-                client_registry_ref,
+        if client.is_logged_in() {
+            let mut clients = client_registry.lock().await;
+
+            if clients.len() >= MAX_CLIENTS {
+                reader
+                    .get_mut()
+                    .write_all(b"421 Too many connections. Try again later.\r\n")
+                    .await?;
+                return Ok(()); // Close connection
+            }
+
+            client.set_client_addr(Some(client_addr));
+            clients.insert(client_addr, client);
+
+            info!(
+                "Authenticated client: {} ({}/{} clients)",
                 client_addr,
-                channel_registry_ref,
-            )
-            .await;
-        });
-    }
+                clients.len(),
+                MAX_CLIENTS
+            );
 
-    pub async fn start(&self) {
-        info!(
-            "Starting Rax FTP server on {} (max {} clients)",
-            COMMAND_SOCKET, MAX_CLIENTS
-        );
-        self.accept_clients().await;
+            let cmd_stream = reader.into_inner();
+
+            drop(clients);
+
+            // Hand off to session handler
+            handle_client(cmd_stream, client_registry, client_addr, channel_registry).await;
+
+            return Ok(());
+        }
     }
 }
