@@ -5,7 +5,7 @@
 //! TCP data streams, managing errors and reporting FTP-compliant
 //! status codes and messages.
 
-use crate::command::CommandStatus;
+use crate::protocol::CommandStatus;
 use log::{error, warn};
 use std::fs::File;
 use std::io::{Read, Write};

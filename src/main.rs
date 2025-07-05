@@ -1,6 +1,21 @@
+//! RAX FTP Server - Entry Point
+//! 
+//! A robust Rust-based FTP server implementing core features of RFC 959.
+
 use env_logger;
 use log::info;
-use rax_ftp_server::server::Server;
+
+mod server;
+mod client;
+mod protocol;
+mod transfer;
+mod auth;
+mod storage;
+mod middleware;
+mod utils;
+mod error;
+
+use server::Server;
 
 #[tokio::main]
 async fn main() {

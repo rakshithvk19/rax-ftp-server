@@ -10,7 +10,7 @@ use std::net::{SocketAddr, TcpStream};
 use std::thread;
 use std::time::Duration;
 
-use crate::channel_registry::ChannelRegistry;
+use crate::transfer::ChannelRegistry;
 
 /// Attempts to accept a new data connection from the TCP listener
 /// associated with a particular client address.

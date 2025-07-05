@@ -5,11 +5,11 @@
 //! setup per client connection.
 
 use crate::auth;
-use crate::channel_registry::{ChannelEntry, ChannelRegistry};
+use crate::transfer::{ChannelEntry, ChannelRegistry};
 use crate::client::Client;
-use crate::command::{Command, CommandData, CommandResult, CommandStatus};
-use crate::data_channel::setup_data_stream;
-use crate::file_transfer::{handle_file_download, handle_file_upload};
+use crate::protocol::{Command, CommandData, CommandResult, CommandStatus};
+use crate::transfer::setup_data_stream;
+use crate::transfer::{handle_file_download, handle_file_upload};
 use log::{error, info};
 
 use std::env;

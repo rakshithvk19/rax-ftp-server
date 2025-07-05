@@ -6,10 +6,10 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
-use crate::channel_registry::ChannelRegistry;
+use crate::transfer::ChannelRegistry;
 use crate::client::Client;
-use crate::command::{CommandData, CommandStatus, parse_command};
-use crate::handlers::handle_command;
+use crate::protocol::{CommandData, CommandStatus, parse_command};
+use crate::protocol::handle_command;
 
 const MAX_COMMAND_LENGTH: usize = 512;
 

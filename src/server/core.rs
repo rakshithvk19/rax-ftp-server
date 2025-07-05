@@ -6,11 +6,11 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
-use crate::channel_registry::ChannelRegistry;
 use crate::client::Client;
-use crate::client_handler::handle_client;
-use crate::command::parse_command;
-use crate::handlers::handle_auth_command;
+use crate::client::handle_client;
+use crate::protocol::handle_auth_command;
+use crate::protocol::parse_command;
+use crate::transfer::ChannelRegistry;
 
 const COMMAND_SOCKET: &str = "127.0.0.1:2121";
 const MAX_CLIENTS: usize = 10;
@@ -85,6 +85,9 @@ async fn handle_new_client(
         .get_mut()
         .write_all(b"220 Welcome to RAX FTP Server\r\n")
         .await?;
+
+    // FLUSH THE GREETING MESSAGE IMMEDIATELY
+    reader.get_mut().flush().await?;
 
     let mut client = Client::default();
 
