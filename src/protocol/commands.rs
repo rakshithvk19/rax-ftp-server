@@ -33,8 +33,10 @@ pub enum CommandStatus {
 }
 
 /// Additional data associated with a command result.
+#[derive(Debug)]
 pub enum CommandData {
-    DirectoryListing(Vec<String>),
+    /// Placeholder variant - currently unused
+    None,
 }
 
 /// Struct encapsulating the full result of a command execution.

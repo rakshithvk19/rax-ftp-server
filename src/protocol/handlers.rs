@@ -177,7 +177,7 @@ pub fn handle_command(
         Command::QUIT => handle_cmd_quit(client),
         Command::USER(username) => handle_cmd_user(client, username),
         Command::PASS(password) => handle_cmd_pass(client, password),
-        Command::LIST => handle_cmd_list(client, config),
+        Command::LIST => handle_cmd_list(client, config, channel_registry),
         Command::PWD => handle_cmd_pwd(client, config),
         Command::LOGOUT => handle_cmd_logout(client),
         Command::RETR(filename) => handle_cmd_retr(client, filename, channel_registry, config),
@@ -278,8 +278,15 @@ fn handle_cmd_pass(client: &mut Client, password: &str) -> CommandResult {
 
 /// Handles the LIST command: provides directory listing to logged-in clients.
 ///
-/// Reads the client's current virtual directory and returns file names with . and .. entries.
-fn handle_cmd_list(client: &Client, config: &ServerConfig) -> CommandResult {
+/// Establishes a data connection and sends the listing over the data channel.
+fn handle_cmd_list(
+    client: &mut Client, 
+    config: &ServerConfig, 
+    channel_registry: &mut ChannelRegistry
+) -> CommandResult {
+    use std::io::Write;
+    
+    // 1. Authentication check
     if !client.is_logged_in() {
         return CommandResult {
             status: CommandStatus::Failure("Not logged in".into()),
@@ -288,65 +295,131 @@ fn handle_cmd_list(client: &Client, config: &ServerConfig) -> CommandResult {
         };
     }
 
-    // Convert virtual path to real path
+    // 2. Data channel initialization check
+    if !client.is_data_channel_init() {
+        return CommandResult {
+            status: CommandStatus::Failure("Data channel not initialized".into()),
+            message: Some("530 Data channel not initialized\r\n".into()),
+            data: None,
+        };
+    }
+
+    // 3. Get client address
+    let client_addr = match client.client_addr() {
+        Some(addr) => *addr,
+        None => {
+            return CommandResult {
+                status: CommandStatus::Failure("Client address unknown".into()),
+                message: Some("500 Internal server error\r\n".into()),
+                data: None,
+            };
+        }
+    };
+
+    // 4. Convert virtual path to real path
     let real_path = virtual_to_real_path(&config.server_root, client.current_virtual_path());
 
+    // 5. Read directory contents with retries
     let retries = 3;
-    for attempt in 1..=retries {
-        match fs::read_dir(&real_path) {
-            Ok(entries) => {
-                let mut file_list = vec![];
-                
-                // Add . and .. entries first
-                file_list.push(".".to_string());
-                if client.current_virtual_path() != "/" {
-                    file_list.push("..".to_string());
+    let file_list = {
+        let mut result = None;
+        for attempt in 1..=retries {
+            match fs::read_dir(&real_path) {
+                Ok(entries) => {
+                    let mut file_list = vec![];
+                    
+                    // Add . and .. entries first
+                    file_list.push(".".to_string());
+                    if client.current_virtual_path() != "/" {
+                        file_list.push("..".to_string());
+                    }
+                    
+                    // Add regular files and directories
+                    for entry in entries.flatten() {
+                        file_list.push(entry.file_name().to_string_lossy().to_string());
+                    }
+                    
+                    result = Some(file_list);
+                    break;
                 }
-                
-                // Add regular files and directories
-                for entry in entries.flatten() {
-                    file_list.push(entry.file_name().to_string_lossy().to_string());
-                }
-                
-                info!(
-                    "Client {} listed directory {} (real: {}) - {} entries",
-                    client.client_addr().map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string()),
-                    client.current_virtual_path(),
-                    real_path.display(),
-                    file_list.len()
-                );
-                
-                return CommandResult {
-                    status: CommandStatus::Success,
-                    message: Some("226 Directory listing successful\r\n".into()),
-                    data: Some(CommandData::DirectoryListing(file_list)),
-                };
-            }
-            Err(e) => {
-                if attempt < retries && e.kind() == std::io::ErrorKind::PermissionDenied {
-                    thread::sleep(Duration::from_millis(100 * attempt as u64));
-                    continue;
-                } else {
-                    error!(
-                        "Failed to list directory {} (real: {}): {}",
-                        client.current_virtual_path(),
-                        real_path.display(),
-                        e
-                    );
-                    return CommandResult {
-                        status: CommandStatus::Failure(e.to_string()),
-                        message: Some("550 Failed to list directory\r\n".into()),
-                        data: None,
-                    };
+                Err(e) => {
+                    if attempt < retries && e.kind() == std::io::ErrorKind::PermissionDenied {
+                        thread::sleep(Duration::from_millis(100 * attempt as u64));
+                        continue;
+                    } else {
+                        error!(
+                            "Failed to list directory {} (real: {}): {}",
+                            client.current_virtual_path(),
+                            real_path.display(),
+                            e
+                        );
+                        return CommandResult {
+                            status: CommandStatus::Failure(e.to_string()),
+                            message: Some("550 Failed to list directory\r\n".into()),
+                            data: None,
+                        };
+                    }
                 }
             }
         }
-    }
+        result.unwrap_or_else(Vec::new)
+    };
 
-    CommandResult {
-        status: CommandStatus::Failure("Unexpected error".into()),
-        message: Some("550 Internal server error\r\n".into()),
-        data: None,
+    info!(
+        "Client {} listed directory {} (real: {}) - {} entries",
+        client_addr,
+        client.current_virtual_path(),
+        real_path.display(),
+        file_list.len()
+    );
+
+    // 6. Setup data stream for directory listing
+    let mut data_stream = match setup_data_stream(channel_registry, &client_addr) {
+        Some(stream) => stream,
+        None => {
+            error!(
+                "Failed to establish data connection for client {}",
+                client_addr
+            );
+            return CommandResult {
+                status: CommandStatus::Failure("425 Can't open data connection".into()),
+                message: Some("425 Can't open data connection\r\n".into()),
+                data: None,
+            };
+        }
+    };
+
+    // 7. Send directory listing over data connection
+    let listing_data = file_list.join("\r\n") + "\r\n";
+    match data_stream.write_all(listing_data.as_bytes()) {
+        Ok(_) => {
+            match data_stream.flush() {
+                Ok(_) => {
+                    info!("Directory listing sent successfully to client {}", client_addr);
+                    CommandResult {
+                        status: CommandStatus::Success,
+                        message: Some("226 Directory send OK\r\n".into()),
+                        data: None,
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to flush data stream: {}", e);
+                    CommandResult {
+                        status: CommandStatus::Failure("426 Connection closed; transfer aborted".into()),
+                        message: Some("426 Connection closed; transfer aborted\r\n".into()),
+                        data: None,
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to send directory listing: {}", e);
+            CommandResult {
+                status: CommandStatus::Failure("426 Connection closed; transfer aborted".into()),
+                message: Some("426 Connection closed; transfer aborted\r\n".into()),
+                data: None,
+            }
+        }
     }
 }
 
@@ -858,6 +931,8 @@ fn handle_cmd_pasv(client: &mut Client, channel_registry: &mut ChannelRegistry) 
 
                 // Format PASV reply with socket information
                 let response = format!("227 Entering Passive Mode ({})\r\n", data_socket);
+                
+                info!("Sending PASV response to client {}: {}", client_addr, response.trim());
 
                 return CommandResult {
                     status: CommandStatus::Success,

@@ -65,11 +65,8 @@ pub async fn handle_client(
                                 break;
                             }
                             CommandStatus::Success => {
-                                if let Some(CommandData::DirectoryListing(listing)) = result.data {
-                                    let listing_output = listing.join("\r\n") + "\r\n";
-                                    let _ = write_half.write_all(listing_output.as_bytes()).await;
-                                }
                                 if let Some(msg) = result.message {
+                                    info!("Sending response to client {}: {}", client_addr, msg.trim());
                                     let _ = write_half.write_all(msg.as_bytes()).await;
                                 }
                             }
