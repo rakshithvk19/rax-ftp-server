@@ -10,6 +10,7 @@ use crate::transfer::ChannelRegistry;
 use crate::client::Client;
 use crate::protocol::{CommandData, CommandStatus, parse_command};
 use crate::protocol::handle_command;
+use crate::server::config::ServerConfig;
 
 const MAX_COMMAND_LENGTH: usize = 512;
 
@@ -23,6 +24,7 @@ pub async fn handle_client(
     clients: Arc<Mutex<HashMap<SocketAddr, Client>>>,
     client_addr: SocketAddr,
     channel_registry: Arc<Mutex<ChannelRegistry>>,
+    config: Arc<ServerConfig>,
 ) {
     let (read_half, mut write_half) = cmd_stream.into_split();
     let mut reader = BufReader::new(read_half);
@@ -52,7 +54,7 @@ pub async fn handle_client(
 
                 match clients_guard.get_mut(&client_addr) {
                     Some(client) => {
-                        let result = handle_command(client, &command, &mut channel_registry_guard);
+                        let result = handle_command(client, &command, &mut channel_registry_guard, &config);
 
                         match result.status {
                             CommandStatus::CloseConnection => {

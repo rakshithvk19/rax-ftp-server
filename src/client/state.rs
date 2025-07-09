@@ -7,25 +7,39 @@ use std::net::SocketAddr;
 
 /// Represents the state of a connected FTP client.
 ///
-/// Tracks authentication status, client address, and
-/// whether the data channel for file transfers has been initialized.
-#[derive(Default)]
+/// Tracks authentication status, client address, virtual directory path,
+/// and whether the data channel for file transfers has been initialized.
 pub struct Client {
     username: Option<String>,
     client_addr: Option<SocketAddr>,
+    current_virtual_path: String,
     is_user_valid: bool,
     is_logged_in: bool,
     is_data_channel_init: bool,
+}
+
+impl Default for Client {
+    fn default() -> Self {
+        Self {
+            username: None,
+            client_addr: None,
+            current_virtual_path: "/".to_string(),
+            is_user_valid: false,
+            is_logged_in: false,
+            is_data_channel_init: false,
+        }
+    }
 }
 
 impl Client {
     /// Resets the client state, logging out and clearing all stored data.
     ///
     /// This includes username, client address, authentication flags,
-    /// and data channel initialization status.
+    /// virtual path, and data channel initialization status.
     pub fn logout(&mut self) {
         self.username = None;
         self.client_addr = None;
+        self.current_virtual_path = "/".to_string();
         self.is_user_valid = false;
         self.is_logged_in = false;
         self.is_data_channel_init = false;
@@ -62,6 +76,11 @@ impl Client {
         self.client_addr.as_ref()
     }
 
+    /// Returns the current virtual path of the client.
+    pub fn current_virtual_path(&self) -> &str {
+        &self.current_virtual_path
+    }
+
     // --------------------
     // Setter methods
     // --------------------
@@ -95,5 +114,10 @@ impl Client {
     /// Sets the client's socket address.
     pub fn set_client_addr(&mut self, addr: Option<SocketAddr>) {
         self.client_addr = addr;
+    }
+
+    /// Sets the current virtual path of the client.
+    pub fn set_current_virtual_path(&mut self, path: String) {
+        self.current_virtual_path = path;
     }
 }
