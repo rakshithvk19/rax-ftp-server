@@ -1,5 +1,5 @@
 //! Configuration utilities
-//! 
+//!
 //! Provides configuration loading and management utilities.
 
 use std::path::Path;

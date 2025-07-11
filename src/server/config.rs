@@ -1,5 +1,5 @@
 //! Server configuration
-//! 
+//!
 //! Manages server configuration settings and validation.
 
 use std::path::PathBuf;
@@ -30,7 +30,7 @@ impl ServerConfig {
     pub fn server_root_str(&self) -> String {
         self.server_root.to_string_lossy().to_string()
     }
-    
+
     /// Get the absolute path of the server root
     pub fn get_absolute_server_root(&self) -> std::io::Result<PathBuf> {
         self.server_root.canonicalize()

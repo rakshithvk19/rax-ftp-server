@@ -1,5 +1,5 @@
 //! Credential storage and management
-//! 
+//!
 //! Handles user credential storage and validation.
 
 use std::collections::HashMap;

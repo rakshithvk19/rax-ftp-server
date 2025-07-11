@@ -1,5 +1,5 @@
 //! Logging middleware
-//! 
+//!
 //! Provides request logging functionality.
 
 use log::info;

@@ -1,10 +1,10 @@
 //! File system operations
-//! 
+//!
 //! Handles file system operations for the FTP server.
 
-use std::path::Path;
 use std::fs;
 use std::io::Result;
+use std::path::Path;
 
 /// Create a directory
 pub fn create_directory(path: &Path) -> Result<()> {

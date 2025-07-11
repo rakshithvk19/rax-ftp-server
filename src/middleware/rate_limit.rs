@@ -1,5 +1,5 @@
 //! Rate limiting middleware
-//! 
+//!
 //! Provides rate limiting functionality.
 
 use std::collections::HashMap;
@@ -20,14 +20,17 @@ impl RateLimiter {
             window,
         }
     }
-    
+
     pub fn is_allowed(&mut self, client_id: &str) -> bool {
         let now = Instant::now();
-        let entry = self.requests.entry(client_id.to_string()).or_insert_with(Vec::new);
-        
+        let entry = self
+            .requests
+            .entry(client_id.to_string())
+            .or_insert_with(Vec::new);
+
         // Remove old requests
         entry.retain(|&time| now.duration_since(time) <= self.window);
-        
+
         // Check if under limit
         if entry.len() < self.max_requests {
             entry.push(now);

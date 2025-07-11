@@ -1,5 +1,5 @@
 //! Network utilities
-//! 
+//!
 //! Provides network-related utility functions.
 
 use std::net::{IpAddr, SocketAddr};

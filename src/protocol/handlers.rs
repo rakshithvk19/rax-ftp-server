@@ -5,156 +5,22 @@
 //! setup per client connection.
 
 use crate::auth;
-use crate::transfer::{ChannelEntry, ChannelRegistry};
 use crate::client::Client;
-use crate::protocol::{Command, CommandData, CommandResult, CommandStatus};
-use crate::transfer::setup_data_stream;
-use crate::transfer::{handle_file_download, handle_file_upload};
+use crate::protocol::{Command, CommandResult, CommandStatus};
 use crate::server::config::ServerConfig;
+use crate::storage::validation::{
+    resolve_and_validate_file_path, resolve_cwd_path, virtual_to_real_path,
+};
+use crate::transfer::setup_data_stream;
+use crate::transfer::{ChannelEntry, ChannelRegistry};
+use crate::transfer::{handle_file_download, handle_file_upload};
 use log::{error, info};
 
-use std::env;
 use std::fs;
 use std::net::{SocketAddr, TcpListener};
-use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::thread;
 use std::time::Duration;
-
-/// Helper function to normalize a path by removing redundant components.
-/// Handles: double slashes, current directory (.), but rejects parent directory (..) for security.
-fn normalize_virtual_path(path: &str) -> Result<String, String> {
-    let path = path.trim();
-    
-    // Handle empty path
-    if path.is_empty() {
-        return Ok("/".to_string());
-    }
-    
-    // Start with root if not absolute
-    let mut normalized = if path.starts_with('/') {
-        String::new()
-    } else {
-        String::new()
-    };
-    
-    let components: Vec<&str> = path
-        .split('/')
-        .filter(|comp| !comp.is_empty() && *comp != ".")
-        .collect();
-    
-    for component in components {
-        // Reject directory traversal attempts
-        if component == ".." {
-            return Err("Directory traversal not allowed".to_string());
-        }
-        
-        // Reject components with dangerous characters
-        if component.contains('\0') || component.contains('\\') {
-            return Err("Invalid path characters".to_string());
-        }
-        
-        normalized.push('/');
-        normalized.push_str(component);
-    }
-    
-    // Ensure we always return at least "/"
-    if normalized.is_empty() {
-        normalized = "/".to_string();
-    }
-    
-    Ok(normalized)
-}
-
-/// Resolve a CWD path relative to the current virtual directory.
-fn resolve_cwd_path(current_virtual_path: &str, requested_path: &str) -> Result<String, String> {
-    let requested = requested_path.trim();
-    
-    if requested.is_empty() {
-        return Ok(current_virtual_path.to_string());
-    }
-    
-    // Handle absolute paths
-    if requested.starts_with('/') {
-        return normalize_virtual_path(requested);
-    }
-    
-    // Handle relative paths - concatenate with current path
-    let combined = if current_virtual_path.ends_with('/') {
-        format!("{}{}", current_virtual_path, requested)
-    } else {
-        format!("{}/{}", current_virtual_path, requested)
-    };
-    
-    normalize_virtual_path(&combined)
-}
-
-/// Convert virtual path to real filesystem path within server_root.
-fn virtual_to_real_path(server_root: &Path, virtual_path: &str) -> PathBuf {
-    let mut real_path = server_root.to_path_buf();
-    
-    // Remove leading slash and add to server_root
-    let relative_path = virtual_path.trim_start_matches('/');
-    if !relative_path.is_empty() {
-        real_path.push(relative_path);
-    }
-    
-    real_path
-}
-
-/// Helper function to resolve a file path within the current virtual directory.
-/// Converts virtual paths to real paths and ensures they stay within server_root.
-fn resolve_file_path(server_root: &Path, current_virtual_path: &str, file_path: &str) -> Result<(PathBuf, String), String> {
-    let file_path = file_path.trim();
-    
-    // Determine the virtual file path
-    let virtual_file_path = if file_path.starts_with('/') {
-        // Absolute virtual path
-        normalize_virtual_path(file_path)?
-    } else {
-        // Relative path - resolve relative to current virtual directory
-        let combined = if current_virtual_path.ends_with('/') {
-            format!("{}{}", current_virtual_path, file_path)
-        } else {
-            format!("{}/{}", current_virtual_path, file_path)
-        };
-        normalize_virtual_path(&combined)?
-    };
-    
-    // Convert to real path
-    let real_path = virtual_to_real_path(server_root, &virtual_file_path);
-    
-    // Ensure the real path is within server_root (security check)
-    match real_path.canonicalize() {
-        Ok(canonical_real) => {
-            match server_root.canonicalize() {
-                Ok(canonical_root) => {
-                    if !canonical_real.starts_with(canonical_root) {
-                        return Err("Path outside server root".to_string());
-                    }
-                }
-                Err(_) => {
-                    // If we can't canonicalize root, skip this check
-                }
-            }
-        }
-        Err(_) => {
-            // Path doesn't exist yet, but that's okay for file creation
-            // Just verify the parent directory would be within bounds
-            if let Some(parent) = real_path.parent() {
-                if let Ok(canonical_parent) = parent.canonicalize() {
-                    if let Ok(canonical_root) = server_root.canonicalize() {
-                        if !canonical_parent.starts_with(canonical_root) {
-                            return Err("Path outside server root".to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    Ok((real_path, virtual_file_path))
-}
 
 /// Dispatches a received FTP command to its corresponding handler.
 ///
@@ -191,7 +57,7 @@ pub fn handle_command(
     }
 }
 
-pub fn handle_auth_command(client: &mut Client, command: &Command) -> CommandResult{
+pub fn handle_auth_command(client: &mut Client, command: &Command) -> CommandResult {
     match command {
         Command::USER(username) => handle_cmd_user(client, username),
         Command::PASS(password) => handle_cmd_pass(client, password),
@@ -280,12 +146,12 @@ fn handle_cmd_pass(client: &mut Client, password: &str) -> CommandResult {
 ///
 /// Establishes a data connection and sends the listing over the data channel.
 fn handle_cmd_list(
-    client: &mut Client, 
-    config: &ServerConfig, 
-    channel_registry: &mut ChannelRegistry
+    client: &mut Client,
+    config: &ServerConfig,
+    channel_registry: &mut ChannelRegistry,
 ) -> CommandResult {
     use std::io::Write;
-    
+
     // 1. Authentication check
     if !client.is_logged_in() {
         return CommandResult {
@@ -327,18 +193,18 @@ fn handle_cmd_list(
             match fs::read_dir(&real_path) {
                 Ok(entries) => {
                     let mut file_list = vec![];
-                    
+
                     // Add . and .. entries first
                     file_list.push(".".to_string());
                     if client.current_virtual_path() != "/" {
                         file_list.push("..".to_string());
                     }
-                    
+
                     // Add regular files and directories
                     for entry in entries.flatten() {
                         file_list.push(entry.file_name().to_string_lossy().to_string());
                     }
-                    
+
                     result = Some(file_list);
                     break;
                 }
@@ -392,26 +258,37 @@ fn handle_cmd_list(
     // 7. Send directory listing over data connection
     let listing_data = file_list.join("\r\n") + "\r\n";
     match data_stream.write_all(listing_data.as_bytes()) {
-        Ok(_) => {
-            match data_stream.flush() {
-                Ok(_) => {
-                    info!("Directory listing sent successfully to client {}", client_addr);
-                    CommandResult {
-                        status: CommandStatus::Success,
-                        message: Some("226 Directory send OK\r\n".into()),
-                        data: None,
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to flush data stream: {}", e);
-                    CommandResult {
-                        status: CommandStatus::Failure("426 Connection closed; transfer aborted".into()),
-                        message: Some("426 Connection closed; transfer aborted\r\n".into()),
-                        data: None,
-                    }
+        Ok(_) => match data_stream.flush() {
+            Ok(_) => {
+                info!(
+                    "Directory listing sent successfully to client {}",
+                    client_addr
+                );
+
+                // Clean up data channel after successful transfer
+                cleanup_data_channel(client, channel_registry, &client_addr);
+
+                CommandResult {
+                    status: CommandStatus::Success,
+                    message: Some("226 Directory send OK\r\n".into()),
+                    data: None,
                 }
             }
-        }
+            Err(e) => {
+                error!("Failed to flush data stream: {}", e);
+
+                // Clean up data channel even on error
+                cleanup_data_channel(client, channel_registry, &client_addr);
+
+                CommandResult {
+                    status: CommandStatus::Failure(
+                        "426 Connection closed; transfer aborted".into(),
+                    ),
+                    message: Some("426 Connection closed; transfer aborted\r\n".into()),
+                    data: None,
+                }
+            }
+        },
         Err(e) => {
             error!("Failed to send directory listing: {}", e);
             CommandResult {
@@ -453,6 +330,7 @@ pub fn handle_cmd_stor(
     channel_registry: &mut ChannelRegistry,
     config: &ServerConfig,
 ) -> CommandResult {
+    use crate::storage::validation::resolve_and_validate_file_path;
     use log::{error, info};
     use std::fs;
 
@@ -483,27 +361,12 @@ pub fn handle_cmd_stor(
         };
     }
 
-    // 4. Filename sanitization to prevent directory traversal and invalid characters
-    if filename.contains("..")
-        || filename.contains('/')
-        || filename.contains('\\')
-        || filename.contains(':')
-        || filename.contains('*')
-        || filename.contains('?')
-        || filename.contains('"')
-        || filename.contains('<')
-        || filename.contains('>')
-        || filename.contains('|')
-    {
-        return CommandResult {
-            status: CommandStatus::Failure("Invalid filename".into()),
-            message: Some("550 Filename invalid\r\n".into()),
-            data: None,
-        };
-    }
-
-    // 5. Resolve file path within current virtual directory
-    let (file_path, virtual_file_path) = match resolve_file_path(&config.server_root, client.current_virtual_path(), filename) {
+    // 4. Resolve and validate file path using new validation module
+    let (file_path, virtual_file_path) = match resolve_and_validate_file_path(
+        &config.server_root,
+        client.current_virtual_path(),
+        filename,
+    ) {
         Ok((real_path, virtual_path)) => (real_path, virtual_path),
         Err(e) => {
             error!("STOR path resolution error: {}", e);
@@ -515,16 +378,54 @@ pub fn handle_cmd_stor(
         }
     };
 
-    // 6. Check if file already exists
+    // 5. Check if parent directory exists (don't auto-create)
+    if let Some(parent_dir) = file_path.parent() {
+        if !parent_dir.exists() {
+            return CommandResult {
+                status: CommandStatus::Failure("Directory not found".into()),
+                message: Some(format!("550 Directory not found\r\n")),
+                data: None,
+            };
+        }
+        if !parent_dir.is_dir() {
+            return CommandResult {
+                status: CommandStatus::Failure("Parent path is not a directory".into()),
+                message: Some("550 Parent path is not a directory\r\n".into()),
+                data: None,
+            };
+        }
+    }
+
+    // 6. Check if file already exists (first-come-first-served approach)
     if fs::metadata(&file_path).is_ok() {
         return CommandResult {
             status: CommandStatus::Failure("File exists".into()),
-            message: Some(format!("550 {}: File already exists\r\n", virtual_file_path)),
+            message: Some(format!(
+                "550 {}: File already exists\r\n",
+                virtual_file_path
+            )),
             data: None,
         };
     }
 
-    // 7. Retrieve client address for logging
+    // 7. Check if temporary file already exists (another upload in progress)
+    let temp_file_path = file_path.with_extension(format!(
+        "{}.tmp",
+        file_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+    ));
+
+    if fs::metadata(&temp_file_path).is_ok() {
+        return CommandResult {
+            status: CommandStatus::Failure("File upload in progress".into()),
+            message: Some("550 File is currently being uploaded by another client\r\n".into()),
+            data: None,
+        };
+    }
+
+    // 8. Retrieve client address for logging
     let client_addr = match client.client_addr() {
         Some(addr) => addr,
         None => {
@@ -538,10 +439,13 @@ pub fn handle_cmd_stor(
 
     info!(
         "Client {} requested to store {} (virtual: {}, real: {})",
-        client_addr, filename, virtual_file_path, file_path.display()
+        client_addr,
+        filename,
+        virtual_file_path,
+        file_path.display()
     );
 
-    // 8. Setup data stream for file upload
+    // 9. Setup data stream for file upload
     let data_stream = match setup_data_stream(channel_registry, client_addr) {
         Some(stream) => stream,
         None => {
@@ -557,8 +461,12 @@ pub fn handle_cmd_stor(
         }
     };
 
-    // 9. Delegate file upload to file transfer module
-    match handle_file_upload(data_stream, &file_path.to_string_lossy()) {
+    // 10. Delegate file upload to file transfer module with temp file support
+    match handle_file_upload(
+        data_stream,
+        &file_path.to_string_lossy(),
+        &temp_file_path.to_string_lossy(),
+    ) {
         Ok((status, msg)) => CommandResult {
             status,
             message: Some(msg.into()),
@@ -570,6 +478,8 @@ pub fn handle_cmd_stor(
             data: None,
         },
     }
+    // // Clean up data channel after successful upload
+    // cleanup_data_channel(client, channel_registry, client_addr);
 }
 
 /// Handles the RETR command: downloads a file from server to client.
@@ -584,6 +494,8 @@ fn handle_cmd_retr(
     channel_registry: &mut ChannelRegistry,
     config: &ServerConfig,
 ) -> CommandResult {
+    use crate::storage::validation::resolve_and_validate_file_path;
+
     // 1. Authentication check
     if !client.is_logged_in() {
         return CommandResult {
@@ -611,27 +523,12 @@ fn handle_cmd_retr(
         };
     }
 
-    // 4. Filename sanitization
-    if filename.contains("..")
-        || filename.contains('/')
-        || filename.contains('\\')
-        || filename.contains(':')
-        || filename.contains('*')
-        || filename.contains('?')
-        || filename.contains('"')
-        || filename.contains('<')
-        || filename.contains('>')
-        || filename.contains('|')
-    {
-        return CommandResult {
-            status: CommandStatus::Failure("Invalid filename".into()),
-            message: Some("550 Filename invalid\r\n".into()),
-            data: None,
-        };
-    }
-
-    // 5. Resolve file path within current virtual directory
-    let (file_path, virtual_file_path) = match resolve_file_path(&config.server_root, client.current_virtual_path(), filename) {
+    // 4. Resolve and validate file path using new validation module
+    let (file_path, virtual_file_path) = match resolve_and_validate_file_path(
+        &config.server_root,
+        client.current_virtual_path(),
+        filename,
+    ) {
         Ok((real_path, virtual_path)) => (real_path, virtual_path),
         Err(e) => {
             error!("RETR path resolution error: {}", e);
@@ -643,7 +540,7 @@ fn handle_cmd_retr(
         }
     };
 
-    // 6. Check if file exists
+    // 5. Check if file exists
     if fs::metadata(&file_path).is_err() {
         return CommandResult {
             status: CommandStatus::Failure("File not found".into()),
@@ -652,7 +549,7 @@ fn handle_cmd_retr(
         };
     }
 
-    // 7. Retrieve client address
+    // 6. Retrieve client address
     let client_addr = match client.client_addr() {
         Some(addr) => addr,
         None => {
@@ -666,10 +563,13 @@ fn handle_cmd_retr(
 
     info!(
         "Client {} requested to retrieve {} (virtual: {}, real: {})",
-        client_addr, filename, virtual_file_path, file_path.display()
+        client_addr,
+        filename,
+        virtual_file_path,
+        file_path.display()
     );
 
-    // 8. Setup data stream for file download
+    // 7. Setup data stream for file download
     let data_stream = match setup_data_stream(channel_registry, client_addr) {
         Some(stream) => stream,
         None => {
@@ -685,7 +585,7 @@ fn handle_cmd_retr(
         }
     };
 
-    // 9. Delegate file download to file transfer module
+    // 8. Delegate file download to file transfer module
     match handle_file_download(data_stream, &file_path.to_string_lossy()) {
         Ok((status, msg)) => CommandResult {
             status,
@@ -704,6 +604,8 @@ fn handle_cmd_retr(
 ///
 /// Checks authentication and file presence before deletion.
 fn handle_cmd_del(client: &Client, filename: &str, config: &ServerConfig) -> CommandResult {
+    use crate::storage::validation::resolve_and_validate_file_path;
+
     if !client.is_logged_in() {
         return CommandResult {
             status: CommandStatus::Failure("Not logged in".into()),
@@ -720,8 +622,12 @@ fn handle_cmd_del(client: &Client, filename: &str, config: &ServerConfig) -> Com
         };
     }
 
-    // Resolve file path within current virtual directory
-    let (file_path, virtual_file_path) = match resolve_file_path(&config.server_root, client.current_virtual_path(), filename) {
+    // Resolve and validate file path using new validation module
+    let (file_path, virtual_file_path) = match resolve_and_validate_file_path(
+        &config.server_root,
+        client.current_virtual_path(),
+        filename,
+    ) {
         Ok((real_path, virtual_path)) => (real_path, virtual_path),
         Err(e) => {
             error!("DEL path resolution error: {}", e);
@@ -739,7 +645,10 @@ fn handle_cmd_del(client: &Client, filename: &str, config: &ServerConfig) -> Com
             Ok(_) => {
                 info!(
                     "Client {} deleted file {} (virtual: {}, real: {})",
-                    client.client_addr().map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string()),
+                    client
+                        .client_addr()
+                        .map(|a| a.to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
                     filename,
                     virtual_file_path,
                     file_path.display()
@@ -757,11 +666,17 @@ fn handle_cmd_del(client: &Client, filename: &str, config: &ServerConfig) -> Com
                 } else {
                     error!(
                         "Failed to delete file {} (virtual: {}, real: {}): {}",
-                        filename, virtual_file_path, file_path.display(), e
+                        filename,
+                        virtual_file_path,
+                        file_path.display(),
+                        e
                     );
                     return CommandResult {
                         status: CommandStatus::Failure(e.to_string()),
-                        message: Some(format!("550 {}: Failed to delete file\r\n", virtual_file_path)),
+                        message: Some(format!(
+                            "550 {}: Failed to delete file\r\n",
+                            virtual_file_path
+                        )),
                         data: None,
                     };
                 }
@@ -775,10 +690,11 @@ fn handle_cmd_del(client: &Client, filename: &str, config: &ServerConfig) -> Com
         data: None,
     }
 }
-
 /// Handles the CWD command: changes the client's virtual working directory.
 /// Validates that the target directory exists within server_root and updates client state.
 fn handle_cmd_cwd(client: &mut Client, path: &str, config: &ServerConfig) -> CommandResult {
+    use crate::storage::validation::{resolve_cwd_path, virtual_to_real_path};
+
     if !client.is_logged_in() {
         return CommandResult {
             status: CommandStatus::Failure("Not logged in".into()),
@@ -795,17 +711,7 @@ fn handle_cmd_cwd(client: &mut Client, path: &str, config: &ServerConfig) -> Com
         };
     }
 
-    // Handle special case of ".." when already at root
-    if path.trim() == ".." && client.current_virtual_path() == "/" {
-        // Stay at root, don't return error
-        return CommandResult {
-            status: CommandStatus::Success,
-            message: Some("250 Directory changed successfully\r\n".into()),
-            data: None,
-        };
-    }
-
-    // Resolve the new virtual path
+    // Resolve the new virtual path using validation module
     let new_virtual_path = match resolve_cwd_path(client.current_virtual_path(), path) {
         Ok(path) => path,
         Err(e) => {
@@ -820,7 +726,7 @@ fn handle_cmd_cwd(client: &mut Client, path: &str, config: &ServerConfig) -> Com
 
     // Convert to real path and check if directory exists
     let real_path = virtual_to_real_path(&config.server_root, &new_virtual_path);
-    
+
     if !real_path.exists() {
         return CommandResult {
             status: CommandStatus::Failure("Directory not found".into()),
@@ -839,10 +745,13 @@ fn handle_cmd_cwd(client: &mut Client, path: &str, config: &ServerConfig) -> Com
 
     // Update client's virtual path
     client.set_current_virtual_path(new_virtual_path.clone());
-    
+
     info!(
         "Client {} changed directory to {} (real: {})",
-        client.client_addr().map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string()),
+        client
+            .client_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
         new_virtual_path,
         real_path.display()
     );
@@ -853,7 +762,6 @@ fn handle_cmd_cwd(client: &mut Client, path: &str, config: &ServerConfig) -> Com
         data: None,
     }
 }
-
 /// Handles the PWD command: returns the current virtual directory to the client.
 ///
 /// Returns the client's current virtual directory path.
@@ -891,13 +799,13 @@ fn handle_cmd_pasv(client: &mut Client, channel_registry: &mut ChannelRegistry) 
         };
     }
 
-    // Prevent duplicate data channel initialization
+    // Clean up any existing data channel before creating new one
     if channel_registry.contains(&client_addr) {
-        return CommandResult {
-            status: CommandStatus::Failure("Data channel already initialized".into()),
-            message: Some("425 Data connection already initialized\r\n".into()),
-            data: None,
-        };
+        info!(
+            "Overwriting existing data channel for client {} with new PASV connection",
+            client_addr
+        );
+        cleanup_data_channel(client, channel_registry, &client_addr);
     }
 
     // Find next available socket for data connection
@@ -931,8 +839,12 @@ fn handle_cmd_pasv(client: &mut Client, channel_registry: &mut ChannelRegistry) 
 
                 // Format PASV reply with socket information
                 let response = format!("227 Entering Passive Mode ({})\r\n", data_socket);
-                
-                info!("Sending PASV response to client {}: {}", client_addr, response.trim());
+
+                info!(
+                    "Sending PASV response to client {}: {}",
+                    client_addr,
+                    response.trim()
+                );
 
                 return CommandResult {
                     status: CommandStatus::Success,
@@ -1010,13 +922,13 @@ fn handle_cmd_port(
         };
     }
 
-    // Prevent duplicate data channel initialization
+    // Clean up any existing data channel before creating new one
     if channel_registry.contains(&client_addr) {
-        return CommandResult {
-            status: CommandStatus::Failure("Data channel already initialized".into()),
-            message: Some("425 Data connection already initialized\r\n".into()),
-            data: None,
-        };
+        info!(
+            "Overwriting existing data channel for client {} with new PORT connection",
+            client_addr
+        );
+        cleanup_data_channel(client, channel_registry, &client_addr);
     }
 
     // Bind TcpListener on client-specified address
@@ -1077,4 +989,22 @@ fn handle_cmd_unknown() -> CommandResult {
         message: Some("500 Syntax error, command unrecognized\r\n".into()),
         data: None,
     }
+}
+
+/// Cleans up data channel resources for a client
+fn cleanup_data_channel(
+    client: &mut Client,
+    channel_registry: &mut ChannelRegistry,
+    client_addr: &SocketAddr,
+) {
+    if let Some(entry) = channel_registry.remove(client_addr) {
+        // Drop the entry to ensure all resources are freed
+        drop(entry);
+        info!(
+            "Cleaned up data channel for client {} - listener and resources freed",
+            client_addr
+        );
+    }
+    client.set_data_channel_init(false);
+    info!("Reset data channel state for client {}", client_addr);
 }

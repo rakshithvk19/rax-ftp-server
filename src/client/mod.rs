@@ -1,11 +1,11 @@
 //! Client management system
-//! 
+//!
 //! Handles client connections, state management, and session lifecycle.
 
-pub mod state;
 pub mod handler;
-pub mod session;
 pub mod registry;
+pub mod session;
+pub mod state;
 
-pub use state::Client;
 pub use handler::handle_client;
+pub use state::Client;

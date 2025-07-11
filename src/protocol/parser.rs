@@ -1,5 +1,5 @@
 //! FTP Command parsing
-//! 
+//!
 //! Handles parsing of FTP commands from client input.
 
 use crate::protocol::Command;

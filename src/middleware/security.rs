@@ -1,5 +1,5 @@
 //! Security middleware
-//! 
+//!
 //! Provides security validation and protection.
 
 /// Validate client IP address

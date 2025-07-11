@@ -1,5 +1,5 @@
 //! Error types
-//! 
+//!
 //! Defines custom error types for the FTP server.
 
 use std::fmt;

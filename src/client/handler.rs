@@ -6,11 +6,11 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
-use crate::transfer::ChannelRegistry;
 use crate::client::Client;
-use crate::protocol::{CommandData, CommandStatus, parse_command};
 use crate::protocol::handle_command;
+use crate::protocol::{CommandData, CommandStatus, parse_command};
 use crate::server::config::ServerConfig;
+use crate::transfer::ChannelRegistry;
 
 const MAX_COMMAND_LENGTH: usize = 512;
 
@@ -54,7 +54,8 @@ pub async fn handle_client(
 
                 match clients_guard.get_mut(&client_addr) {
                     Some(client) => {
-                        let result = handle_command(client, &command, &mut channel_registry_guard, &config);
+                        let result =
+                            handle_command(client, &command, &mut channel_registry_guard, &config);
 
                         match result.status {
                             CommandStatus::CloseConnection => {
@@ -66,7 +67,11 @@ pub async fn handle_client(
                             }
                             CommandStatus::Success => {
                                 if let Some(msg) = result.message {
-                                    info!("Sending response to client {}: {}", client_addr, msg.trim());
+                                    info!(
+                                        "Sending response to client {}: {}",
+                                        client_addr,
+                                        msg.trim()
+                                    );
                                     let _ = write_half.write_all(msg.as_bytes()).await;
                                 }
                             }
@@ -90,6 +95,18 @@ pub async fn handle_client(
                 error!("Failed to read from {}: {}", client_addr, e);
                 break;
             }
+        }
+    }
+
+    // Clean up any remaining data channels
+    {
+        let mut channel_registry_guard = channel_registry.lock().await;
+        if let Some(entry) = channel_registry_guard.remove(&client_addr) {
+            drop(entry);
+            info!(
+                "Cleaned up data channel for disconnecting client {}",
+                client_addr
+            );
         }
     }
 

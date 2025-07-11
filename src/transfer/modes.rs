@@ -1,5 +1,5 @@
 //! FTP Transfer modes
-//! 
+//!
 //! Handles active and passive mode implementations.
 
 /// FTP transfer modes

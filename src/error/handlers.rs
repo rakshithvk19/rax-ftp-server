@@ -1,5 +1,5 @@
 //! Error handlers
-//! 
+//!
 //! Provides error handling and recovery functions.
 
 use crate::error::FtpServerError;

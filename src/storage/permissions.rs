@@ -1,5 +1,5 @@
 //! File permissions
-//! 
+//!
 //! Handles file permission management.
 
 use std::path::Path;
