@@ -6,5 +6,4 @@
 pub mod config;
 pub mod core;
 
-pub use config::ServerConfig;
 pub use core::Server;

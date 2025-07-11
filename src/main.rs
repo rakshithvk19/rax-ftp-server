@@ -9,6 +9,7 @@ mod auth;
 mod client;
 mod error;
 mod middleware;
+mod navigate;
 mod protocol;
 mod server;
 mod storage;

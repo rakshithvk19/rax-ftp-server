@@ -1,8 +1,10 @@
 //! Authentication system
 //!
-//! Handles user authentication, credential validation, and session management.
+//! Handles user authentication and credential validation.
 
-pub mod credentials;
+mod credentials;
+mod results;
 pub mod validator;
 
-pub use validator::{AuthError, validate_password, validate_user};
+pub use results::{PasswordValidationResult, UserValidationResult};
+pub use validator::{validate_password, validate_user};

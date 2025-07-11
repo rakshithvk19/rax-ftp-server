@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 
 use crate::client::Client;
 use crate::protocol::handle_command;
-use crate::protocol::{CommandData, CommandStatus, parse_command};
+use crate::protocol::{CommandStatus, parse_command};
 use crate::server::config::ServerConfig;
 use crate::transfer::ChannelRegistry;
 

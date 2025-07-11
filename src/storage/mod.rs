@@ -1,10 +1,12 @@
-//! File system storage management
+//! Storage module
 //!
-//! Handles file operations, permissions, and path validation.
+//! Handles file system operations and storage management.
 
 pub mod filesystem;
+mod operations;
 pub mod permissions;
+mod results;
 pub mod validation;
 
-// Re-export commonly used validation functions
-pub use validation::{MAX_DIRECTORY_DEPTH, resolve_and_validate_file_path, virtual_to_real_path};
+pub use operations::{delete_file, list_directory, prepare_file_retrieval, prepare_file_storage};
+pub use results::{DeleteResult, ListResult, RetrieveResult, StoreResult};

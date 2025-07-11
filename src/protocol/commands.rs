@@ -33,17 +33,17 @@ pub enum CommandStatus {
 }
 
 /// Additional data associated with a command result.
-#[derive(Debug)]
-pub enum CommandData {
-    /// Placeholder variant - currently unused
-    None,
-}
+// #[derive(Debug)]
+// pub enum CommandData {
+//     /// Placeholder variant - currently unused
+//     None,
+// }
 
 /// Struct encapsulating the full result of a command execution.
 pub struct CommandResult {
     pub status: CommandStatus,
     pub message: Option<String>,
-    pub data: Option<CommandData>,
+    // pub data: Option<CommandData>,
 }
 
 /// Parses a raw command string received from a client into the `Command` enum.
