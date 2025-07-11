@@ -2,6 +2,7 @@
 //!
 //! This module acts as a thin orchestration layer, delegating business logic
 //! to domain-specific modules and translating their results to FTP responses.
+//! Updated to support persistent data connections.
 
 use log::info;
 use std::io::Write;
@@ -27,12 +28,12 @@ pub fn handle_command(
     config: &ServerConfig,
 ) -> CommandResult {
     match command {
-        Command::QUIT => handle_cmd_quit(client),
+        Command::QUIT => handle_cmd_quit(client, channel_registry),
         Command::USER(username) => handle_cmd_user(client, username),
         Command::PASS(password) => handle_cmd_pass(client, password),
         Command::LIST => handle_cmd_list(client, config, channel_registry),
         Command::PWD => handle_cmd_pwd(client),
-        Command::LOGOUT => handle_cmd_logout(client),
+        Command::LOGOUT => handle_cmd_logout(client, channel_registry),
         Command::RETR(filename) => handle_cmd_retr(client, filename, channel_registry, config),
         Command::STOR(filename) => handle_cmd_stor(client, filename, channel_registry, config),
         Command::DEL(filename) => handle_cmd_del(client, filename, config),
@@ -58,7 +59,12 @@ pub fn handle_auth_command(client: &mut Client, command: &Command) -> CommandRes
 }
 
 /// Handles the QUIT command
-fn handle_cmd_quit(client: &mut Client) -> CommandResult {
+fn handle_cmd_quit(client: &mut Client, channel_registry: &mut ChannelRegistry) -> CommandResult {
+    // Clean up any persistent data channels for this client
+    if let Some(client_addr) = client.client_addr() {
+        transfer::cleanup_data_channel(channel_registry, client_addr);
+    }
+
     match client::process_quit(client) {
         Ok(result) => quit_result_to_ftp_response(result),
         Err(error) => client_error_to_ftp_response(error),
@@ -170,9 +176,8 @@ fn handle_cmd_list(
                     client_addr
                 );
 
-                // Clean up data channel after successful transfer
-                transfer::cleanup_data_channel(channel_registry, &client_addr);
-                client.set_data_channel_init(false);
+                // Clean up only the data stream, keep persistent setup
+                transfer::cleanup_data_stream_only(channel_registry, &client_addr);
 
                 CommandResult {
                     status: CommandStatus::Success,
@@ -181,14 +186,17 @@ fn handle_cmd_list(
                 }
             }
             Err(e) => {
-                // Clean up even on error
-                transfer::cleanup_data_channel(channel_registry, &client_addr);
-                client.set_data_channel_init(false);
+                // Clean up only the data stream on error
+                transfer::cleanup_data_stream_only(channel_registry, &client_addr);
 
                 transfer_error_to_ftp_response(crate::error::TransferError::TransferFailed(e))
             }
         },
-        Err(e) => transfer_error_to_ftp_response(crate::error::TransferError::TransferFailed(e)),
+        Err(e) => {
+            // Clean up only the data stream on error
+            transfer::cleanup_data_stream_only(channel_registry, &client_addr);
+            transfer_error_to_ftp_response(crate::error::TransferError::TransferFailed(e))
+        }
     }
 }
 
@@ -206,7 +214,12 @@ fn handle_cmd_pwd(client: &Client) -> CommandResult {
 }
 
 /// Handles the LOGOUT command
-fn handle_cmd_logout(client: &mut Client) -> CommandResult {
+fn handle_cmd_logout(client: &mut Client, channel_registry: &mut ChannelRegistry) -> CommandResult {
+    // Clean up any persistent data channels for this client
+    if let Some(client_addr) = client.client_addr() {
+        transfer::cleanup_data_channel(channel_registry, client_addr);
+    }
+
     match client::process_logout(client) {
         Ok(result) => logout_result_to_ftp_response(result),
         Err(error) => client_error_to_ftp_response(error),
@@ -273,21 +286,33 @@ fn handle_cmd_retr(
     };
 
     // Delegate file download to transfer module
-    match crate::transfer::handle_file_download(
+    let result = match crate::transfer::handle_file_download(
         data_stream,
         &retrieve_result.file_path.to_string_lossy(),
     ) {
-        Ok((status, msg)) => CommandResult {
-            status,
-            message: Some(msg.into()),
-            //
-        },
-        Err((status, msg)) => CommandResult {
-            status,
-            message: Some(msg.into()),
-            //
-        },
-    }
+        Ok((status, msg)) => {
+            // Clean up only the data stream, keep persistent setup
+            transfer::cleanup_data_stream_only(channel_registry, &client_addr);
+            
+            CommandResult {
+                status,
+                message: Some(msg.into()),
+                //
+            }
+        }
+        Err((status, msg)) => {
+            // Clean up only the data stream on error
+            transfer::cleanup_data_stream_only(channel_registry, &client_addr);
+            
+            CommandResult {
+                status,
+                message: Some(msg.into()),
+                //
+            }
+        }
+    };
+
+    result
 }
 
 /// Handles the STOR command
@@ -350,22 +375,34 @@ fn handle_cmd_stor(
     };
 
     // Delegate file upload to transfer module
-    match crate::transfer::handle_file_upload(
+    let result = match crate::transfer::handle_file_upload(
         data_stream,
         &store_result.file_path.to_string_lossy(),
         &store_result.temp_path.to_string_lossy(),
     ) {
-        Ok((status, msg)) => CommandResult {
-            status,
-            message: Some(msg.into()),
-            //
-        },
-        Err((status, msg)) => CommandResult {
-            status,
-            message: Some(msg.into()),
-            //
-        },
-    }
+        Ok((status, msg)) => {
+            // Clean up only the data stream, keep persistent setup
+            transfer::cleanup_data_stream_only(channel_registry, &client_addr);
+            
+            CommandResult {
+                status,
+                message: Some(msg.into()),
+                //
+            }
+        }
+        Err((status, msg)) => {
+            // Clean up only the data stream on error
+            transfer::cleanup_data_stream_only(channel_registry, &client_addr);
+            
+            CommandResult {
+                status,
+                message: Some(msg.into()),
+                //
+            }
+        }
+    };
+
+    result
 }
 
 /// Handles the DEL command
@@ -439,17 +476,7 @@ fn handle_cmd_pasv(client: &mut Client, channel_registry: &mut ChannelRegistry) 
         }
     };
 
-    // Clean up any existing data channel before creating new one
-    if channel_registry.contains(&client_addr) {
-        info!(
-            "Overwriting existing data channel for client {} with new PASV connection",
-            client_addr
-        );
-        transfer::cleanup_data_channel(channel_registry, &client_addr);
-        client.set_data_channel_init(false);
-    }
-
-    // Setup passive mode
+    // Setup passive mode (this will replace any existing setup)
     match transfer::setup_passive_mode(channel_registry, client_addr) {
         Ok(result) => {
             client.set_data_channel_init(true);
@@ -483,17 +510,7 @@ fn handle_cmd_port(
         }
     };
 
-    // Clean up any existing data channel before creating new one
-    if channel_registry.contains(&client_addr) {
-        info!(
-            "Overwriting existing data channel for client {} with new PORT connection",
-            client_addr
-        );
-        transfer::cleanup_data_channel(channel_registry, &client_addr);
-        client.set_data_channel_init(false);
-    }
-
-    // Setup active mode
+    // Setup active mode (this will replace any existing setup)
     match transfer::setup_active_mode(channel_registry, client_addr, addr) {
         Ok(result) => {
             client.set_data_channel_init(true);

@@ -14,7 +14,6 @@ mod protocol;
 mod server;
 mod storage;
 mod transfer;
-mod utils;
 
 use server::Server;
 
