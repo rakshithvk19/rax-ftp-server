@@ -41,7 +41,11 @@ pub async fn handle_client(
             Ok(_) => {
                 // Enforce command length limit
                 if line.len() > MAX_COMMAND_LENGTH {
-                    let _ = write_half.write_all(b"500 Command too long\r\n").await;
+                    error!("Command too long ({} chars) from client {}", line.len(), client_addr);
+                    if let Err(e) = write_half.write_all(b"500 Command too long\r\n").await {
+                        error!("Failed to send error response to {}: {}", client_addr, e);
+                        break;
+                    }
                     continue;
                 }
 
@@ -60,7 +64,9 @@ pub async fn handle_client(
                         match result.status {
                             CommandStatus::CloseConnection => {
                                 if let Some(msg) = result.message {
-                                    let _ = write_half.write_all(msg.as_bytes()).await;
+                                    if let Err(e) = write_half.write_all(msg.as_bytes()).await {
+                                        error!("Failed to send quit response to {}: {}", client_addr, e);
+                                    }
                                 }
                                 info!("Client {} requested to quit", client_addr);
                                 break;
@@ -68,25 +74,34 @@ pub async fn handle_client(
                             CommandStatus::Success => {
                                 if let Some(msg) = result.message {
                                     info!(
-                                        "Sending response to client {}: {}",
+                                        "Sending success response to client {}: {}",
                                         client_addr,
                                         msg.trim()
                                     );
-                                    let _ = write_half.write_all(msg.as_bytes()).await;
+                                    if let Err(e) = write_half.write_all(msg.as_bytes()).await {
+                                        error!("Failed to send success response to {}: {}", client_addr, e);
+                                        break;
+                                    }
                                 }
                             }
-                            CommandStatus::Failure(_) => {
+                            CommandStatus::Failure(ref reason) => {
+                                info!("Command failed for client {}: {}", client_addr, reason);
                                 if let Some(msg) = result.message {
-                                    let _ = write_half.write_all(msg.as_bytes()).await;
+                                    if let Err(e) = write_half.write_all(msg.as_bytes()).await {
+                                        error!("Failed to send error response to {}: {}", client_addr, e);
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
                     None => {
-                        error!("Client {} not found in clients map", client_addr);
-                        let _ = write_half
+                        error!("Client {} not found in clients map - terminating connection", client_addr);
+                        if let Err(e) = write_half
                             .write_all(b"421 Client session not found\r\n")
-                            .await;
+                            .await {
+                            error!("Failed to send session error to {}: {}", client_addr, e);
+                        }
                         break;
                     }
                 }
@@ -107,10 +122,18 @@ pub async fn handle_client(
                 "Cleaned up data channel for disconnecting client {}",
                 client_addr
             );
+        } else {
+            info!("No data channel to clean up for client {}", client_addr);
         }
     }
 
-    let mut clients_guard = clients.lock().await;
-    clients_guard.remove(&client_addr);
-    info!("Client {} disconnected", client_addr);
+    // Clean up client from registry
+    {
+        let mut clients_guard = clients.lock().await;
+        if clients_guard.remove(&client_addr).is_some() {
+            info!("Client {} removed from registry and disconnected", client_addr);
+        } else {
+            info!("Client {} was already removed from registry", client_addr);
+        }
+    }
 }

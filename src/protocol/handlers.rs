@@ -4,11 +4,11 @@
 //! to domain-specific modules and translating their results to FTP responses.
 //! Updated to support persistent data connections.
 
-use log::info;
+use log::{error, info};
 use std::io::Write;
 
 use crate::auth;
-use crate::client::{self, Client};
+use crate::client::Client;
 use crate::error::AuthError;
 use crate::navigate;
 use crate::protocol::translators::*;
@@ -60,14 +60,30 @@ pub fn handle_auth_command(client: &mut Client, command: &Command) -> CommandRes
 
 /// Handles the QUIT command
 fn handle_cmd_quit(client: &mut Client, channel_registry: &mut ChannelRegistry) -> CommandResult {
+    let client_addr_str = client
+        .client_addr()
+        .map(|addr| addr.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    info!("Processing QUIT command for client {}", client_addr_str);
+
     // Clean up any persistent data channels for this client
     if let Some(client_addr) = client.client_addr() {
+        info!(
+            "Cleaning up data channels for quitting client {}",
+            client_addr
+        );
         transfer::cleanup_data_channel(channel_registry, client_addr);
     }
 
-    match client::process_quit(client) {
-        Ok(result) => quit_result_to_ftp_response(result),
-        Err(error) => client_error_to_ftp_response(error),
+    // Logout the client directly
+    client.logout();
+
+    info!("Client {} has quit successfully", client_addr_str);
+
+    CommandResult {
+        status: CommandStatus::CloseConnection,
+        message: Some("221 Goodbye\r\n".into()),
     }
 }
 
@@ -119,7 +135,6 @@ fn handle_cmd_pass(client: &mut Client, password: &str) -> CommandResult {
     }
 }
 
-/// Handles the LIST command
 fn handle_cmd_list(
     client: &mut Client,
     config: &ServerConfig,
@@ -136,6 +151,7 @@ fn handle_cmd_list(
             crate::error::TransferError::DataChannelNotInitialized,
         );
     }
+    info!("{} data channel init", &client.is_data_channel_init());
 
     // Get client address
     let client_addr = match client.client_addr() {
@@ -154,10 +170,53 @@ fn handle_cmd_list(
             Err(error) => return storage_error_to_ftp_response(error),
         };
 
-    // Setup data stream
+    // Send 150 response immediately
+    let initial_response = CommandResult {
+        status: CommandStatus::Success,
+        message: Some("150 Here comes the directory listing\r\n".into()),
+    };
+
+    // Prepare listener for immediate connection
+    if let Some(entry) = channel_registry.get_mut(&client_addr) {
+        if let Some(listener) = entry.listener_mut() {
+            // DEBUG: Check current listener state
+            match listener.local_addr() {
+                Ok(addr) => info!("DEBUG: About to set listener to blocking mode on {}", addr),
+                Err(e) => error!("DEBUG: Cannot get listener address before setting blocking: {}", e),
+            }
+            
+            // Switch to blocking mode to be ready for immediate connection
+            if let Err(e) = listener.set_nonblocking(false) {
+                error!("Failed to set listener to blocking mode: {}", e);
+                return transfer_error_to_ftp_response(
+                    crate::error::TransferError::DataChannelSetupFailed(
+                        "Failed to prepare data connection".into(),
+                    ),
+                );
+            }
+            info!("Listener set to blocking mode, ready for client connection");
+            
+            // DEBUG: Verify blocking mode was set correctly
+            match listener.local_addr() {
+                Ok(addr) => info!("DEBUG: Listener blocking mode set successfully on {}", addr),
+                Err(e) => error!("DEBUG: Cannot verify listener address after setting blocking: {}", e),
+            }
+        } else {
+            error!("DEBUG: No listener found in channel registry for client {}", client_addr);
+        }
+    } else {
+        error!("DEBUG: No channel registry entry found for client {}", client_addr);
+    }
+
+    // Setup data stream (now ready to accept immediately)
+    info!("DEBUG: About to call setup_data_stream for client {} at {:?}", client_addr, std::time::SystemTime::now());
     let mut data_stream = match setup_data_stream(channel_registry, &client_addr) {
-        Some(stream) => stream,
+        Some(stream) => {
+            info!("DEBUG: setup_data_stream returned successful stream for client {} at {:?}", client_addr, std::time::SystemTime::now());
+            stream
+        }
         None => {
+            error!("DEBUG: setup_data_stream returned None for client {} at {:?}", client_addr, std::time::SystemTime::now());
             return transfer_error_to_ftp_response(
                 crate::error::TransferError::DataChannelSetupFailed(
                     "Failed to establish data connection".into(),
@@ -176,30 +235,53 @@ fn handle_cmd_list(
                     client_addr
                 );
 
-                // Clean up only the data stream, keep persistent setup
+                // Close the data connection completely
+                let _ = data_stream.shutdown(std::net::Shutdown::Both);
+
+                // Clean up the stream but keep persistent setup
                 transfer::cleanup_data_stream_only(channel_registry, &client_addr);
+
+                // Reset listener back to non-blocking mode for next time
+                if let Some(entry) = channel_registry.get_mut(&client_addr) {
+                    if let Some(listener) = entry.listener_mut() {
+                        let _ = listener.set_nonblocking(true);
+                    }
+                }
 
                 CommandResult {
                     status: CommandStatus::Success,
                     message: Some("226 Directory send OK\r\n".into()),
-                    //
                 }
             }
             Err(e) => {
-                // Clean up only the data stream on error
+                // Clean up and reset on error
+                let _ = data_stream.shutdown(std::net::Shutdown::Both);
                 transfer::cleanup_data_stream_only(channel_registry, &client_addr);
+
+                if let Some(entry) = channel_registry.get_mut(&client_addr) {
+                    if let Some(listener) = entry.listener_mut() {
+                        let _ = listener.set_nonblocking(true);
+                    }
+                }
 
                 transfer_error_to_ftp_response(crate::error::TransferError::TransferFailed(e))
             }
         },
         Err(e) => {
-            // Clean up only the data stream on error
+            // Clean up and reset on error
+            let _ = data_stream.shutdown(std::net::Shutdown::Both);
             transfer::cleanup_data_stream_only(channel_registry, &client_addr);
+
+            if let Some(entry) = channel_registry.get_mut(&client_addr) {
+                if let Some(listener) = entry.listener_mut() {
+                    let _ = listener.set_nonblocking(true);
+                }
+            }
+
             transfer_error_to_ftp_response(crate::error::TransferError::TransferFailed(e))
         }
     }
 }
-
 /// Handles the PWD command
 fn handle_cmd_pwd(client: &Client) -> CommandResult {
     // Authentication check
@@ -215,14 +297,42 @@ fn handle_cmd_pwd(client: &Client) -> CommandResult {
 
 /// Handles the LOGOUT command
 fn handle_cmd_logout(client: &mut Client, channel_registry: &mut ChannelRegistry) -> CommandResult {
+    let client_addr_str = client
+        .client_addr()
+        .map(|addr| addr.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    info!("Processing LOGOUT command for client {}", client_addr_str);
+
+    // Check if user is actually logged in
+    if !client.is_logged_in() {
+        info!(
+            "LOGOUT attempted by client {} who is not logged in",
+            client_addr_str
+        );
+        return CommandResult {
+            status: CommandStatus::Failure("Not logged in".into()),
+            message: Some("530 User not logged in\r\n".into()),
+        };
+    }
+
     // Clean up any persistent data channels for this client
     if let Some(client_addr) = client.client_addr() {
+        info!(
+            "Cleaning up data channels for logging out client {}",
+            client_addr
+        );
         transfer::cleanup_data_channel(channel_registry, client_addr);
     }
 
-    match client::process_logout(client) {
-        Ok(result) => logout_result_to_ftp_response(result),
-        Err(error) => client_error_to_ftp_response(error),
+    // Logout the client directly
+    client.logout();
+
+    info!("Client {} has logged out successfully", client_addr_str);
+
+    CommandResult {
+        status: CommandStatus::Success,
+        message: Some("221 Logout successful\r\n".into()),
     }
 }
 
@@ -293,7 +403,7 @@ fn handle_cmd_retr(
         Ok((status, msg)) => {
             // Clean up only the data stream, keep persistent setup
             transfer::cleanup_data_stream_only(channel_registry, &client_addr);
-            
+
             CommandResult {
                 status,
                 message: Some(msg.into()),
@@ -303,7 +413,7 @@ fn handle_cmd_retr(
         Err((status, msg)) => {
             // Clean up only the data stream on error
             transfer::cleanup_data_stream_only(channel_registry, &client_addr);
-            
+
             CommandResult {
                 status,
                 message: Some(msg.into()),
@@ -383,7 +493,7 @@ fn handle_cmd_stor(
         Ok((status, msg)) => {
             // Clean up only the data stream, keep persistent setup
             transfer::cleanup_data_stream_only(channel_registry, &client_addr);
-            
+
             CommandResult {
                 status,
                 message: Some(msg.into()),
@@ -393,7 +503,7 @@ fn handle_cmd_stor(
         Err((status, msg)) => {
             // Clean up only the data stream on error
             transfer::cleanup_data_stream_only(channel_registry, &client_addr);
-            
+
             CommandResult {
                 status,
                 message: Some(msg.into()),

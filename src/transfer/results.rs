@@ -15,5 +15,5 @@ pub struct PassiveModeResult {
 #[derive(Debug)]
 pub struct ActiveModeResult {
     pub data_socket: SocketAddr,
-    pub listener: TcpListener,
+    pub listener: Option<TcpListener>,  // None for active mode, Some for passive mode
 }

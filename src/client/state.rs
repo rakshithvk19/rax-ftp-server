@@ -37,6 +37,16 @@ impl Client {
     /// This includes username, client address, authentication flags,
     /// virtual path, and data channel initialization status.
     pub fn logout(&mut self) {
+        if self.is_logged_in {
+            log::info!(
+                "Logging out client {} (user: {})",
+                self.client_addr
+                    .map(|addr| addr.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                self.username.as_ref().unwrap_or(&"unknown".to_string())
+            );
+        }
+
         self.username = None;
         self.client_addr = None;
         self.current_virtual_path = "/".to_string();
@@ -93,9 +103,16 @@ impl Client {
     }
 
     /// Sets the login state of the client.
-    ///
-    /// Typically set after successful PASS command validation.
     pub fn set_logged_in(&mut self, logged_in: bool) {
+        if logged_in && !self.is_logged_in {
+            log::info!(
+                "Client {} successfully logged in as user {}",
+                self.client_addr
+                    .map(|addr| addr.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                self.username.as_ref().unwrap_or(&"unknown".to_string())
+            );
+        }
         self.is_logged_in = logged_in;
     }
 
@@ -106,9 +123,33 @@ impl Client {
         self.is_data_channel_init = init;
     }
 
-    /// Sets the username of the client.
-    pub fn set_username(&mut self, username: Option<String>) {
+    /// Sets the username of the client with validation
+    pub fn set_username(&mut self, username: Option<String>) -> Result<(), String> {
+        if let Some(ref new_username) = username {
+            // Validate username
+            if new_username.is_empty() {
+                return Err("Username cannot be empty".to_string());
+            }
+            if new_username.len() > 32 {
+                return Err("Username too long (max 32 characters)".to_string());
+            }
+            if new_username.contains('\0')
+                || new_username.contains('\n')
+                || new_username.contains('\r')
+            {
+                return Err("Username contains invalid characters".to_string());
+            }
+
+            log::info!(
+                "Client {} set username to: {}",
+                self.client_addr
+                    .map(|addr| addr.to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                new_username
+            );
+        }
         self.username = username;
+        Ok(())
     }
 
     /// Sets the client's socket address.
@@ -117,7 +158,31 @@ impl Client {
     }
 
     /// Sets the current virtual path of the client.
-    pub fn set_current_virtual_path(&mut self, path: String) {
+    /// Sets the current virtual path of the client with validation
+    pub fn set_current_virtual_path(&mut self, path: String) -> Result<(), String> {
+        // Validate virtual path
+        if path.is_empty() {
+            return Err("Virtual path cannot be empty".to_string());
+        }
+        if !path.starts_with('/') {
+            return Err("Virtual path must start with /".to_string());
+        }
+        if path.contains('\0') {
+            return Err("Virtual path contains null characters".to_string());
+        }
+        if path.contains("..") {
+            return Err("Virtual path cannot contain directory traversal".to_string());
+        }
+
+        log::info!(
+            "Client {} changed virtual path to: {}",
+            self.client_addr
+                .map(|addr| addr.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            path
+        );
+
         self.current_virtual_path = path;
+        Ok(())
     }
 }

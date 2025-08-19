@@ -37,6 +37,12 @@ pub fn setup_passive_mode(
     listener.set_nonblocking(true)
         .map_err(TransferError::ListenerConfigurationFailed)?;
     
+    // DEBUG: Verify listener was created and configured correctly
+    match listener.local_addr() {
+        Ok(addr) => info!("DEBUG: PASV listener successfully created on {} (non-blocking mode)", addr),
+        Err(e) => error!("DEBUG: Failed to get PASV listener address: {}", e),
+    }
+    
     // Clone listener for registry
     let listener_clone = listener.try_clone()
         .map_err(|e| TransferError::ListenerConfigurationFailed(e))?;
@@ -52,7 +58,7 @@ pub fn setup_passive_mode(
     channel_registry.insert(client_addr, entry);
     
     info!(
-        "Client {} bound to persistent data socket {} in PASV mode",
+        "Client {} configured for passive mode - client will connect to server at {}",
         client_addr, data_socket
     );
     
@@ -95,35 +101,26 @@ pub fn setup_active_mode(
         return Err(TransferError::InvalidPortRange(port));
     }
     
-    // Bind TcpListener on client-specified address
-    let listener = TcpListener::bind(parsed_addr)
-        .map_err(|e| TransferError::PortBindingFailed(parsed_addr, e))?;
-    
-    // Set listener to non-blocking to "stop listening" until needed
-    listener.set_nonblocking(true)
-        .map_err(TransferError::ListenerConfigurationFailed)?;
-    
-    // Clone listener for registry
-    let listener_clone = listener.try_clone()
-        .map_err(|e| TransferError::ListenerConfigurationFailed(e))?;
+    // ✅ CORRECT: In active mode, server stores client's address and connects to it later
+    // The client is the one with the TcpListener, not the server!
     
     // Create new channel entry for persistent data connection
     let mut entry = ChannelEntry::default();
-    entry.set_data_socket(Some(parsed_addr));
+    entry.set_data_socket(Some(parsed_addr));  // Store client's data address
     entry.set_data_stream(None);
-    entry.set_listener(Some(listener_clone));
+    entry.set_listener(None);  // No listener in active mode - server connects to client!
     entry.set_owner_ip(Some(client_addr.ip())); // Set ownership
     
     channel_registry.insert(client_addr, entry);
     
     info!(
-        "Client {} bound to persistent data socket {} in PORT mode",
+        "Client {} configured for active mode - server will connect to client at {}",
         client_addr, parsed_addr
     );
     
     Ok(ActiveModeResult {
         data_socket: parsed_addr,
-        listener,
+        listener: None,  // No listener in active mode
     })
 }
 

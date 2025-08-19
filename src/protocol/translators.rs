@@ -3,7 +3,6 @@
 //! Translates domain-specific results and errors to FTP protocol responses.
 
 use crate::auth::{PasswordValidationResult, UserValidationResult};
-use crate::client::{LogoutResult, QuitResult};
 use crate::error::{AuthError, ClientError, NavigateError, StorageError, TransferError};
 use crate::navigate::{CwdResult, PwdResult};
 use crate::protocol::{CommandResult, CommandStatus};
@@ -196,18 +195,4 @@ pub fn client_error_to_ftp_response(error: ClientError) -> CommandResult {
     }
 }
 
-/// Translates logout result to FTP response
-pub fn logout_result_to_ftp_response(result: LogoutResult) -> CommandResult {
-    CommandResult {
-        status: CommandStatus::Success,
-        message: Some("221 Logout successful\r\n".into()),
-    }
-}
 
-/// Translates quit result to FTP response
-pub fn quit_result_to_ftp_response(result: QuitResult) -> CommandResult {
-    CommandResult {
-        status: CommandStatus::CloseConnection,
-        message: Some("221 Goodbye\r\n".into()),
-    }
-}
