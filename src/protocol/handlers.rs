@@ -5,17 +5,20 @@
 //! Updated to support persistent data connections.
 
 use log::{error, info};
-use std::io::Write;
 
 use crate::auth;
 use crate::client::Client;
 use crate::error::AuthError;
+use crate::error::TransferError;
 use crate::navigate;
 use crate::protocol::translators::*;
 use crate::protocol::{Command, CommandResult, CommandStatus};
 use crate::server::config::ServerConfig;
 use crate::storage;
-use crate::transfer::{self, ChannelRegistry, setup_data_stream};
+use crate::transfer::{
+    self, ChannelRegistry, receive_file_upload, send_directory_listing, setup_data_stream,
+    validate_client_and_data_channel,
+};
 
 /// Dispatches a received FTP command to its corresponding handler.
 ///
@@ -140,18 +143,13 @@ fn handle_cmd_list(
     config: &ServerConfig,
     channel_registry: &mut ChannelRegistry,
 ) -> CommandResult {
-    // Authentication check
-    if !client.is_logged_in() {
-        return auth_error_to_ftp_response(AuthError::NotLoggedIn);
+    // Authentication and data channel validation
+    if !validate_client_and_data_channel(client) {
+        if !client.is_logged_in() {
+            return auth_error_to_ftp_response(AuthError::NotLoggedIn);
+        }
+        return transfer_error_to_ftp_response(TransferError::DataChannelNotInitialized);
     }
-
-    // Data channel check
-    if !client.is_data_channel_init() {
-        return transfer_error_to_ftp_response(
-            crate::error::TransferError::DataChannelNotInitialized,
-        );
-    }
-    info!("{} data channel init", &client.is_data_channel_init());
 
     // Get client address
     let client_addr = match client.client_addr() {
@@ -170,115 +168,20 @@ fn handle_cmd_list(
             Err(error) => return storage_error_to_ftp_response(error),
         };
 
-    // Send 150 response immediately
-    let initial_response = CommandResult {
-        status: CommandStatus::Success,
-        message: Some("150 Here comes the directory listing\r\n".into()),
-    };
-
-    // Prepare listener for immediate connection
-    if let Some(entry) = channel_registry.get_mut(&client_addr) {
-        if let Some(listener) = entry.listener_mut() {
-            // DEBUG: Check current listener state
-            match listener.local_addr() {
-                Ok(addr) => info!("DEBUG: About to set listener to blocking mode on {}", addr),
-                Err(e) => error!("DEBUG: Cannot get listener address before setting blocking: {}", e),
-            }
-            
-            // Switch to blocking mode to be ready for immediate connection
-            if let Err(e) = listener.set_nonblocking(false) {
-                error!("Failed to set listener to blocking mode: {}", e);
-                return transfer_error_to_ftp_response(
-                    crate::error::TransferError::DataChannelSetupFailed(
-                        "Failed to prepare data connection".into(),
-                    ),
-                );
-            }
-            info!("Listener set to blocking mode, ready for client connection");
-            
-            // DEBUG: Verify blocking mode was set correctly
-            match listener.local_addr() {
-                Ok(addr) => info!("DEBUG: Listener blocking mode set successfully on {}", addr),
-                Err(e) => error!("DEBUG: Cannot verify listener address after setting blocking: {}", e),
-            }
-        } else {
-            error!("DEBUG: No listener found in channel registry for client {}", client_addr);
-        }
-    } else {
-        error!("DEBUG: No channel registry entry found for client {}", client_addr);
-    }
-
-    // Setup data stream (now ready to accept immediately)
-    info!("DEBUG: About to call setup_data_stream for client {} at {:?}", client_addr, std::time::SystemTime::now());
-    let mut data_stream = match setup_data_stream(channel_registry, &client_addr) {
-        Some(stream) => {
-            info!("DEBUG: setup_data_stream returned successful stream for client {} at {:?}", client_addr, std::time::SystemTime::now());
-            stream
-        }
-        None => {
-            error!("DEBUG: setup_data_stream returned None for client {} at {:?}", client_addr, std::time::SystemTime::now());
-            return transfer_error_to_ftp_response(
-                crate::error::TransferError::DataChannelSetupFailed(
-                    "Failed to establish data connection".into(),
-                ),
-            );
-        }
-    };
-
-    // Send the listing over data connection
-    let listing_data = list_result.entries.join("\r\n") + "\r\n";
-    match data_stream.write_all(listing_data.as_bytes()) {
-        Ok(_) => match data_stream.flush() {
-            Ok(_) => {
-                info!(
-                    "Directory listing sent successfully to client {}",
-                    client_addr
-                );
-
-                // Close the data connection completely
-                let _ = data_stream.shutdown(std::net::Shutdown::Both);
-
-                // Clean up the stream but keep persistent setup
-                transfer::cleanup_data_stream_only(channel_registry, &client_addr);
-
-                // Reset listener back to non-blocking mode for next time
-                if let Some(entry) = channel_registry.get_mut(&client_addr) {
-                    if let Some(listener) = entry.listener_mut() {
-                        let _ = listener.set_nonblocking(true);
-                    }
-                }
-
-                CommandResult {
-                    status: CommandStatus::Success,
-                    message: Some("226 Directory send OK\r\n".into()),
-                }
-            }
-            Err(e) => {
-                // Clean up and reset on error
-                let _ = data_stream.shutdown(std::net::Shutdown::Both);
-                transfer::cleanup_data_stream_only(channel_registry, &client_addr);
-
-                if let Some(entry) = channel_registry.get_mut(&client_addr) {
-                    if let Some(listener) = entry.listener_mut() {
-                        let _ = listener.set_nonblocking(true);
-                    }
-                }
-
-                transfer_error_to_ftp_response(crate::error::TransferError::TransferFailed(e))
-            }
-        },
-        Err(e) => {
-            // Clean up and reset on error
-            let _ = data_stream.shutdown(std::net::Shutdown::Both);
+    // Send directory listing over data channel
+    match send_directory_listing(channel_registry, &client_addr, list_result.entries) {
+        Ok(_) => {
+            // Clean up the stream but keep persistent setup
             transfer::cleanup_data_stream_only(channel_registry, &client_addr);
 
-            if let Some(entry) = channel_registry.get_mut(&client_addr) {
-                if let Some(listener) = entry.listener_mut() {
-                    let _ = listener.set_nonblocking(true);
-                }
+            CommandResult {
+                status: CommandStatus::Success,
+                message: Some("226 Directory send OK\r\n".into()),
             }
-
-            transfer_error_to_ftp_response(crate::error::TransferError::TransferFailed(e))
+        }
+        Err(e) => {
+            transfer::cleanup_data_stream_only(channel_registry, &client_addr);
+            transfer_error_to_ftp_response(e)
         }
     }
 }
@@ -432,13 +335,11 @@ fn handle_cmd_stor(
     channel_registry: &mut ChannelRegistry,
     config: &ServerConfig,
 ) -> CommandResult {
-    // Authentication check
-    if !client.is_logged_in() {
-        return auth_error_to_ftp_response(AuthError::NotLoggedIn);
-    }
-
-    // Data channel check
-    if !client.is_data_channel_init() {
+    // Authentication and data channel validation
+    if !validate_client_and_data_channel(client) {
+        if !client.is_logged_in() {
+            return auth_error_to_ftp_response(AuthError::NotLoggedIn);
+        }
         return transfer_error_to_ftp_response(
             crate::error::TransferError::DataChannelNotInitialized,
         );
@@ -472,47 +373,27 @@ fn handle_cmd_stor(
         store_result.file_path.display()
     );
 
-    // Setup data stream
-    let data_stream = match setup_data_stream(channel_registry, &client_addr) {
-        Some(stream) => stream,
-        None => {
-            return transfer_error_to_ftp_response(
-                crate::error::TransferError::DataChannelSetupFailed(
-                    "Failed to establish data connection".into(),
-                ),
-            );
-        }
-    };
-
-    // Delegate file upload to transfer module
-    let result = match crate::transfer::handle_file_upload(
-        data_stream,
+    // Receive file upload over data channel
+    match receive_file_upload(
+        channel_registry,
+        &client_addr,
         &store_result.file_path.to_string_lossy(),
         &store_result.temp_path.to_string_lossy(),
     ) {
-        Ok((status, msg)) => {
-            // Clean up only the data stream, keep persistent setup
+        Ok(_) => {
+            // Clean up the stream but keep persistent setup
             transfer::cleanup_data_stream_only(channel_registry, &client_addr);
 
             CommandResult {
-                status,
-                message: Some(msg.into()),
-                //
+                status: CommandStatus::Success,
+                message: Some("226 Transfer complete\r\n".into()),
             }
         }
-        Err((status, msg)) => {
-            // Clean up only the data stream on error
+        Err(e) => {
             transfer::cleanup_data_stream_only(channel_registry, &client_addr);
-
-            CommandResult {
-                status,
-                message: Some(msg.into()),
-                //
-            }
+            transfer_error_to_ftp_response(e)
         }
-    };
-
-    result
+    }
 }
 
 /// Handles the DEL command
