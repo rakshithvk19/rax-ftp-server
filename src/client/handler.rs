@@ -1,14 +1,16 @@
 use log::{error, info};
 use std::collections::HashMap;
+use std::future::Future;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, WriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
 use crate::client::Client;
 use crate::protocol::handle_command;
-use crate::protocol::{CommandStatus, parse_command};
+use crate::protocol::{parse_command, CommandStatus};
 use crate::server::config::ServerConfig;
 use crate::transfer::ChannelRegistry;
 
@@ -30,6 +32,19 @@ pub async fn handle_client(
     let mut reader = BufReader::new(read_half);
     let mut line = String::new();
 
+    let write_half = Arc::new(Mutex::new(write_half));
+
+    let send_intermediate = {
+        let write_half = write_half.clone();
+        move |msg: &str| {
+            let write_half = write_half.clone();
+            let msg_owned = msg.to_string();
+            Box::pin(async move {
+                let mut writer = write_half.lock().await;
+                writer.write_all(msg_owned.as_bytes()).await
+            }) as Pin<Box<dyn Future<Output = Result<(), std::io::Error>> + Send>>
+        }
+    };
     loop {
         line.clear();
         match reader.read_line(&mut line).await {
@@ -39,12 +54,18 @@ pub async fn handle_client(
                 break;
             }
             Ok(_) => {
-                // Enforce command length limit
                 if line.len() > MAX_COMMAND_LENGTH {
-                    error!("Command too long ({} chars) from client {}", line.len(), client_addr);
-                    if let Err(e) = write_half.write_all(b"500 Command too long\r\n").await {
-                        error!("Failed to send error response to {}: {}", client_addr, e);
-                        break;
+                    error!(
+                        "Command too long ({} chars) from client {}",
+                        line.len(),
+                        client_addr
+                    );
+                    {
+                        let mut writer = write_half.lock().await;
+                        if let Err(e) = writer.write_all(b"500 Command too long\r\n").await {
+                            error!("Failed to send error response to {}: {}", client_addr, e);
+                            break;
+                        }
                     }
                     continue;
                 }
@@ -58,14 +79,25 @@ pub async fn handle_client(
 
                 match clients_guard.get_mut(&client_addr) {
                     Some(client) => {
-                        let result =
-                            handle_command(client, &command, &mut channel_registry_guard, &config);
+                        let result = handle_command(
+                            client,
+                            &command,
+                            &mut channel_registry_guard,
+                            &config,
+                            &send_intermediate,
+                        )
+                        .await;
 
                         match result.status {
                             CommandStatus::CloseConnection => {
                                 if let Some(msg) = result.message {
-                                    if let Err(e) = write_half.write_all(msg.as_bytes()).await {
-                                        error!("Failed to send quit response to {}: {}", client_addr, e);
+                                    // CHANGE: Use Arc<Mutex> for quit response
+                                    let mut writer = write_half.lock().await;
+                                    if let Err(e) = writer.write_all(msg.as_bytes()).await {
+                                        error!(
+                                            "Failed to send quit response to {}: {}",
+                                            client_addr, e
+                                        );
                                     }
                                 }
                                 info!("Client {} requested to quit", client_addr);
@@ -78,8 +110,13 @@ pub async fn handle_client(
                                         client_addr,
                                         msg.trim()
                                     );
-                                    if let Err(e) = write_half.write_all(msg.as_bytes()).await {
-                                        error!("Failed to send success response to {}: {}", client_addr, e);
+                                    // CHANGE: Use Arc<Mutex> for success response
+                                    let mut writer = write_half.lock().await;
+                                    if let Err(e) = writer.write_all(msg.as_bytes()).await {
+                                        error!(
+                                            "Failed to send success response to {}: {}",
+                                            client_addr, e
+                                        );
                                         break;
                                     }
                                 }
@@ -87,8 +124,13 @@ pub async fn handle_client(
                             CommandStatus::Failure(ref reason) => {
                                 info!("Command failed for client {}: {}", client_addr, reason);
                                 if let Some(msg) = result.message {
-                                    if let Err(e) = write_half.write_all(msg.as_bytes()).await {
-                                        error!("Failed to send error response to {}: {}", client_addr, e);
+                                    // CHANGE: Use Arc<Mutex> for error response
+                                    let mut writer = write_half.lock().await;
+                                    if let Err(e) = writer.write_all(msg.as_bytes()).await {
+                                        error!(
+                                            "Failed to send error response to {}: {}",
+                                            client_addr, e
+                                        );
                                         break;
                                     }
                                 }
@@ -96,11 +138,18 @@ pub async fn handle_client(
                         }
                     }
                     None => {
-                        error!("Client {} not found in clients map - terminating connection", client_addr);
-                        if let Err(e) = write_half
-                            .write_all(b"421 Client session not found\r\n")
-                            .await {
-                            error!("Failed to send session error to {}: {}", client_addr, e);
+                        error!(
+                            "Client {} not found in clients map - terminating connection",
+                            client_addr
+                        );
+                        // CHANGE: Use Arc<Mutex> for session error
+                        {
+                            let mut writer = write_half.lock().await;
+                            if let Err(e) =
+                                writer.write_all(b"421 Client session not found\r\n").await
+                            {
+                                error!("Failed to send session error to {}: {}", client_addr, e);
+                            }
                         }
                         break;
                     }
@@ -131,7 +180,10 @@ pub async fn handle_client(
     {
         let mut clients_guard = clients.lock().await;
         if clients_guard.remove(&client_addr).is_some() {
-            info!("Client {} removed from registry and disconnected", client_addr);
+            info!(
+                "Client {} removed from registry and disconnected",
+                client_addr
+            );
         } else {
             info!("Client {} was already removed from registry", client_addr);
         }

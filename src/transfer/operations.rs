@@ -8,14 +8,13 @@ use std::str::FromStr;
 use log::{error, info, warn};
 
 use crate::error::TransferError;
-use crate::transfer::results::{PassiveModeResult, ActiveModeResult};
 use crate::transfer::{ChannelRegistry, ChannelEntry};
 
 /// Sets up passive mode for data transfer with persistent connection support
 pub fn setup_passive_mode(
     channel_registry: &mut ChannelRegistry,
     client_addr: SocketAddr,
-) -> Result<PassiveModeResult, TransferError> {
+) -> Result<SocketAddr, TransferError> {
     // Clean up any existing entry for this client (replacement behavior)
     if channel_registry.contains(&client_addr) {
         info!(
@@ -62,10 +61,7 @@ pub fn setup_passive_mode(
         client_addr, data_socket
     );
     
-    Ok(PassiveModeResult {
-        data_socket,
-        listener,
-    })
+    Ok(data_socket)
 }
 
 /// Sets up active mode for data transfer (PORT command) with persistent connection support
@@ -73,7 +69,7 @@ pub fn setup_active_mode(
     channel_registry: &mut ChannelRegistry,
     client_addr: SocketAddr,
     port_command_addr: &str,
-) -> Result<ActiveModeResult, TransferError> {
+) -> Result<(), TransferError> {
     // Clean up any existing entry for this client (replacement behavior)
     if channel_registry.contains(&client_addr) {
         info!(
@@ -118,10 +114,7 @@ pub fn setup_active_mode(
         client_addr, parsed_addr
     );
     
-    Ok(ActiveModeResult {
-        data_socket: parsed_addr,
-        listener: None,  // No listener in active mode
-    })
+    Ok(())
 }
 
 /// Cleans up only the data stream for a client, keeping the persistent setup intact.

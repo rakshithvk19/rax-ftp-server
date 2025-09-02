@@ -8,7 +8,6 @@ pub mod data_channel;
 pub mod file_ops;
 pub mod modes;
 pub mod operations;
-pub mod results;
 
 // Re-export key types and functions
 pub use channel_registry::{ChannelEntry, ChannelRegistry};
@@ -17,4 +16,3 @@ pub use file_ops::{handle_file_download, handle_file_upload};
 pub use operations::{
     cleanup_data_channel, cleanup_data_stream_only, setup_active_mode, setup_passive_mode,
 };
-pub use results::{ActiveModeResult, PassiveModeResult};

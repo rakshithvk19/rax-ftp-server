@@ -1,22 +1,14 @@
 //! Navigation operations implementation
 
 use crate::error::NavigateError;
-use crate::navigate::results::{CwdResult, PwdResult};
 use std::path::Path;
-
-/// Retrieves the current working directory for a client
-pub fn get_working_directory(current_virtual_path: &str) -> Result<PwdResult, NavigateError> {
-    Ok(PwdResult {
-        virtual_path: current_virtual_path.to_string(),
-    })
-}
 
 /// Changes the working directory for a client
 pub fn change_directory(
     server_root: &Path,
     current_virtual_path: &str,
     target_path: &str,
-) -> Result<CwdResult, NavigateError> {
+) -> Result<String, NavigateError> {
     use crate::storage::validation::{resolve_cwd_path, virtual_to_real_path};
     
     // Validate target path
@@ -54,8 +46,5 @@ pub fn change_directory(
         }
     }
     
-    Ok(CwdResult {
-        new_virtual_path,
-        real_path,
-    })
+    Ok(new_virtual_path)
 }

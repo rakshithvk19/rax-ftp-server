@@ -6,8 +6,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
-use crate::client::Client;
 use crate::client::handle_client;
+use crate::client::Client;
 use crate::protocol::handle_auth_command;
 use crate::protocol::parse_command;
 use crate::server::config::ServerConfig;
@@ -62,6 +62,7 @@ impl Server {
         loop {
             match self.listener.accept().await {
                 Ok((stream, addr)) => {
+                    info!("Client {} connected to FTP server", addr);
                     let client_registry = Arc::clone(&self.client_registry);
                     let channel_registry = Arc::clone(&self.channel_registry);
                     let config = Arc::clone(&self.config);

@@ -3,20 +3,19 @@
 //! Handles file system operations for FTP commands including list, retrieve, store, and delete.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 use log::{error, info};
 
 use crate::error::StorageError;
-use crate::storage::results::{ListResult, RetrieveResult, StoreResult, DeleteResult};
 use crate::storage::validation::{resolve_and_validate_file_path, virtual_to_real_path};
 
 /// Lists the contents of a directory
 pub fn list_directory(
     server_root: &Path,
     current_virtual_path: &str,
-) -> Result<ListResult, StorageError> {
+) -> Result<Vec<String>, StorageError> {
     let real_path = virtual_to_real_path(server_root, current_virtual_path);
     
     // Read directory contents with retries
@@ -34,9 +33,21 @@ pub fn list_directory(
                     file_list.push("..".to_string());
                 }
                 
-                // Add regular files and directories
+                // Add regular files and directories with type information
                 for entry in entries.flatten() {
-                    file_list.push(entry.file_name().to_string_lossy().to_string());
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    
+                    // Check if it's a directory and append / if so (FTP standard)
+                    if let Ok(metadata) = entry.metadata() {
+                        if metadata.is_dir() {
+                            file_list.push(format!("{}/", name));
+                        } else {
+                            file_list.push(name);
+                        }
+                    } else {
+                        // If metadata fails, just add the name as-is
+                        file_list.push(name);
+                    }
                 }
                 
                 result = Some(file_list);
@@ -73,10 +84,7 @@ pub fn list_directory(
         entries.len()
     );
     
-    Ok(ListResult {
-        entries,
-        path: current_virtual_path.to_string(),
-    })
+    Ok(entries)
 }
 
 /// Prepares for file retrieval
@@ -84,7 +92,7 @@ pub fn prepare_file_retrieval(
     server_root: &Path,
     current_virtual_path: &str,
     filename: &str,
-) -> Result<RetrieveResult, StorageError> {
+) -> Result<PathBuf, StorageError> {
     if filename.is_empty() {
         return Err(StorageError::InvalidPath("Empty filename".into()));
     }
@@ -111,10 +119,7 @@ pub fn prepare_file_retrieval(
         file_path.display()
     );
     
-    Ok(RetrieveResult {
-        file_path,
-        virtual_path: virtual_file_path,
-    })
+    Ok(file_path)
 }
 
 /// Prepares for file storage
@@ -122,7 +127,7 @@ pub fn prepare_file_storage(
     server_root: &Path,
     current_virtual_path: &str,
     filename: &str,
-) -> Result<StoreResult, StorageError> {
+) -> Result<(PathBuf, PathBuf), StorageError> {
     if filename.is_empty() {
         return Err(StorageError::InvalidPath("Empty filename".into()));
     }
@@ -173,11 +178,7 @@ pub fn prepare_file_storage(
         file_path.display()
     );
     
-    Ok(StoreResult {
-        file_path,
-        virtual_path: virtual_file_path,
-        temp_path: temp_file_path,
-    })
+    Ok((file_path, temp_file_path))
 }
 
 /// Deletes a file
@@ -185,7 +186,7 @@ pub fn delete_file(
     server_root: &Path,
     current_virtual_path: &str,
     filename: &str,
-) -> Result<DeleteResult, StorageError> {
+) -> Result<(), StorageError> {
     if filename.is_empty() {
         return Err(StorageError::InvalidPath("Empty filename".into()));
     }
@@ -216,10 +217,7 @@ pub fn delete_file(
                     virtual_file_path,
                     file_path.display()
                 );
-                return Ok(DeleteResult {
-                    file_path,
-                    virtual_path: virtual_file_path,
-                });
+                return Ok(());
             }
             Err(e) => {
                 if attempt < retries && e.kind() == std::io::ErrorKind::PermissionDenied {

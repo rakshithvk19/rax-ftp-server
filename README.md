@@ -62,7 +62,6 @@ This project demonstrates robust systems programming skills with Rust, including
 
 - Rust (stable, edition 2021 or later)
 - Cargo
-- `telnet` and `netcat` (`nc`) for testing
 - Dependencies (in `Cargo.toml`):
   ```toml
   [dependencies]

@@ -43,7 +43,6 @@ pub enum CommandStatus {
 pub struct CommandResult {
     pub status: CommandStatus,
     pub message: Option<String>,
-    // pub data: Option<CommandData>,
 }
 
 /// Parses a raw command string received from a client into the `Command` enum.
