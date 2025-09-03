@@ -10,11 +10,16 @@ use crate::error::AuthError;
 fn is_valid_input(input: &str) -> bool {
     !input.trim().is_empty()
         && input.len() <= 64
-        && !input.contains(|c: char| c == '\r' || c == '\n' || c == '\0')
+        && !input.contains(['\r', '\n', '\0'])
 }
 
 /// Validates that the given username exists in the credential store.
 pub fn validate_user(username: &str) -> Result<(), AuthError> {
+    // Check for invalid username characters/format
+    if username.contains(['@', '#', '$', '%']) || username.starts_with(char::is_numeric) {
+        return Err(AuthError::InvalidUsername(username.to_string()));
+    }
+    
     if !is_valid_input(username) {
         return Err(AuthError::MalformedInput("Invalid username format".into()));
     }

@@ -2,7 +2,6 @@
 //!
 //! A robust Rust-based FTP server implementing core features of RFC 959.
 
-use env_logger;
 use log::info;
 
 mod auth;

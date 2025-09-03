@@ -2,7 +2,7 @@
 //!
 //! Handles comprehensive path validation, security checks, and path resolution for FTP operations.
 
-use log::{error, warn};
+use log::warn;
 use std::path::{Path, PathBuf};
 
 /// Maximum allowed subdirectory depth (0 = root, 1 = one level deep, etc.)
@@ -26,7 +26,7 @@ pub fn normalize_path(path: &str) -> Result<String, String> {
 
     // Ensure leading slash for absolute paths
     if path.starts_with('/') || path.starts_with('\\') {
-        Ok(format!("/{}", normalized))
+        Ok(format!("/{normalized}"))
     } else {
         Ok(normalized)
     }
@@ -45,8 +45,7 @@ pub fn validate_directory_depth(path: &str) -> Result<(), String> {
 
     if depth > MAX_DIRECTORY_DEPTH {
         return Err(format!(
-            "Directory depth {} exceeds maximum allowed depth of {}",
-            depth, MAX_DIRECTORY_DEPTH
+            "Directory depth {depth} exceeds maximum allowed depth of {MAX_DIRECTORY_DEPTH}"
         ));
     }
 
@@ -68,7 +67,7 @@ pub fn validate_path_component(component: &str) -> Result<(), String> {
     let dangerous_chars = ['\0', '<', '>', '|', '"', '*', '?', ':'];
     for ch in dangerous_chars {
         if component.contains(ch) {
-            return Err(format!("Invalid character '{}' in path", ch));
+            return Err(format!("Invalid character '{ch}' in path"));
         }
     }
 
@@ -79,7 +78,7 @@ pub fn validate_path_component(component: &str) -> Result<(), String> {
     ];
 
     if reserved_names.contains(&component.to_uppercase().as_str()) {
-        return Err(format!("Reserved filename: {}", component));
+        return Err(format!("Reserved filename: {component}"));
     }
 
     Ok(())
@@ -124,9 +123,9 @@ pub fn resolve_file_path(current_virtual_path: &str, file_path: &str) -> Result<
     } else {
         // Relative path - resolve relative to current virtual directory
         let combined = if current_virtual_path.ends_with('/') {
-            format!("{}{}", current_virtual_path, file_path)
+            format!("{current_virtual_path}{file_path}")
         } else {
-            format!("{}/{}", current_virtual_path, file_path)
+            format!("{current_virtual_path}/{file_path}")
         };
         validate_path(&combined)?
     };
@@ -157,9 +156,9 @@ pub fn resolve_cwd_path(
 
     // Handle relative paths
     let combined = if current_virtual_path.ends_with('/') {
-        format!("{}{}", current_virtual_path, requested)
+        format!("{current_virtual_path}{requested}")
     } else {
-        format!("{}/{}", current_virtual_path, requested)
+        format!("{current_virtual_path}/{requested}")
     };
 
     validate_path(&combined)
@@ -227,16 +226,4 @@ pub fn resolve_and_validate_file_path(
     verify_path_within_bounds(server_root, &real_path)?;
 
     Ok((real_path, virtual_file_path))
-}
-
-/// Legacy compatibility functions
-pub fn is_safe_path(path: &Path) -> bool {
-    !path.to_string_lossy().contains("..")
-}
-
-pub fn sanitize_filename(filename: &str) -> Option<String> {
-    match validate_path_component(filename) {
-        Ok(_) => Some(filename.to_string()),
-        Err(_) => None,
-    }
 }

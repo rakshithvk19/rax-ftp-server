@@ -4,7 +4,7 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, WriteHalf};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
@@ -28,7 +28,7 @@ pub async fn handle_client(
     channel_registry: Arc<Mutex<ChannelRegistry>>,
     config: Arc<ServerConfig>,
 ) {
-    let (read_half, mut write_half) = cmd_stream.into_split();
+    let (read_half, write_half) = cmd_stream.into_split();
     let mut reader = BufReader::new(read_half);
     let mut line = String::new();
 
@@ -50,7 +50,7 @@ pub async fn handle_client(
         match reader.read_line(&mut line).await {
             Ok(0) => {
                 // Client closed the connection
-                info!("Connection closed by client {}", client_addr);
+                info!("Connection closed by client {client_addr}");
                 break;
             }
             Ok(_) => {
@@ -63,7 +63,7 @@ pub async fn handle_client(
                     {
                         let mut writer = write_half.lock().await;
                         if let Err(e) = writer.write_all(b"500 Command too long\r\n").await {
-                            error!("Failed to send error response to {}: {}", client_addr, e);
+                            error!("Failed to send error response to {client_addr}: {e}");
                             break;
                         }
                     }
@@ -95,12 +95,11 @@ pub async fn handle_client(
                                     let mut writer = write_half.lock().await;
                                     if let Err(e) = writer.write_all(msg.as_bytes()).await {
                                         error!(
-                                            "Failed to send quit response to {}: {}",
-                                            client_addr, e
+                                            "Failed to send quit response to {client_addr}: {e}"
                                         );
                                     }
                                 }
-                                info!("Client {} requested to quit", client_addr);
+                                info!("Client {client_addr} requested to quit");
                                 break;
                             }
                             CommandStatus::Success => {
@@ -114,22 +113,20 @@ pub async fn handle_client(
                                     let mut writer = write_half.lock().await;
                                     if let Err(e) = writer.write_all(msg.as_bytes()).await {
                                         error!(
-                                            "Failed to send success response to {}: {}",
-                                            client_addr, e
+                                            "Failed to send success response to {client_addr}: {e}"
                                         );
                                         break;
                                     }
                                 }
                             }
                             CommandStatus::Failure(ref reason) => {
-                                info!("Command failed for client {}: {}", client_addr, reason);
+                                info!("Command failed for client {client_addr}: {reason}");
                                 if let Some(msg) = result.message {
                                     // CHANGE: Use Arc<Mutex> for error response
                                     let mut writer = write_half.lock().await;
                                     if let Err(e) = writer.write_all(msg.as_bytes()).await {
                                         error!(
-                                            "Failed to send error response to {}: {}",
-                                            client_addr, e
+                                            "Failed to send error response to {client_addr}: {e}"
                                         );
                                         break;
                                     }
@@ -139,8 +136,7 @@ pub async fn handle_client(
                     }
                     None => {
                         error!(
-                            "Client {} not found in clients map - terminating connection",
-                            client_addr
+                            "Client {client_addr} not found in clients map - terminating connection"
                         );
                         // CHANGE: Use Arc<Mutex> for session error
                         {
@@ -148,7 +144,7 @@ pub async fn handle_client(
                             if let Err(e) =
                                 writer.write_all(b"421 Client session not found\r\n").await
                             {
-                                error!("Failed to send session error to {}: {}", client_addr, e);
+                                error!("Failed to send session error to {client_addr}: {e}");
                             }
                         }
                         break;
@@ -156,7 +152,7 @@ pub async fn handle_client(
                 }
             }
             Err(e) => {
-                error!("Failed to read from {}: {}", client_addr, e);
+                error!("Failed to read from {client_addr}: {e}");
                 break;
             }
         }
@@ -168,11 +164,10 @@ pub async fn handle_client(
         if let Some(entry) = channel_registry_guard.remove(&client_addr) {
             drop(entry);
             info!(
-                "Cleaned up data channel for disconnecting client {}",
-                client_addr
+                "Cleaned up data channel for disconnecting client {client_addr}"
             );
         } else {
-            info!("No data channel to clean up for client {}", client_addr);
+            info!("No data channel to clean up for client {client_addr}");
         }
     }
 
@@ -181,11 +176,10 @@ pub async fn handle_client(
         let mut clients_guard = clients.lock().await;
         if clients_guard.remove(&client_addr).is_some() {
             info!(
-                "Client {} removed from registry and disconnected",
-                client_addr
+                "Client {client_addr} removed from registry and disconnected"
             );
         } else {
-            info!("Client {} was already removed from registry", client_addr);
+            info!("Client {client_addr} was already removed from registry");
         }
     }
 }

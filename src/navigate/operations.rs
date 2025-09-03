@@ -18,7 +18,7 @@ pub fn change_directory(
     
     // Resolve the new virtual path
     let new_virtual_path = resolve_cwd_path(current_virtual_path, target_path)
-        .map_err(|e| NavigateError::InvalidPath(e))?;
+        .map_err(NavigateError::InvalidPath)?;
     
     // Convert to real path and verify it exists
     let real_path = virtual_to_real_path(server_root, &new_virtual_path);

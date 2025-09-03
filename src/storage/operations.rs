@@ -49,16 +49,16 @@ pub fn list_directory(
                             .unwrap_or(0);
 
                         let name_with_type = if metadata.is_dir() {
-                            format!("{}/", name)
+                            format!("{name}/")
                         } else {
                             name
                         };
 
                         // Format: "name|size|timestamp"
-                        file_list.push(format!("{}|{}|{}", name_with_type, size, timestamp));
+                        file_list.push(format!("{name_with_type}|{size}|{timestamp}"));
                     } else {
                         // If metadata fails, use fallback format
-                        file_list.push(format!("{}|0|0", name));
+                        file_list.push(format!("{name}|0|0"));
                     }
                 }
 
@@ -70,6 +70,12 @@ pub fn list_directory(
                     thread::sleep(Duration::from_millis(100 * attempt as u64));
                     continue;
                 } else {
+                    // After retries, check if it's still a permission issue
+                    if e.kind() == std::io::ErrorKind::PermissionDenied {
+                        return Err(StorageError::PermissionDenied(
+                            current_virtual_path.to_string(),
+                        ));
+                    }
                     error!(
                         "Failed to list directory {} (real: {}): {}",
                         current_virtual_path,
@@ -83,8 +89,7 @@ pub fn list_directory(
     }
 
     let entries = result.ok_or_else(|| {
-        StorageError::IoError(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        StorageError::IoError(std::io::Error::other(
             "Failed to read directory after retries",
         ))
     })?;
@@ -111,7 +116,7 @@ pub fn prepare_file_retrieval(
 
     let (file_path, virtual_file_path) =
         resolve_and_validate_file_path(server_root, current_virtual_path, filename)
-            .map_err(|e| StorageError::InvalidPath(e))?;
+            .map_err(StorageError::InvalidPath)?;
 
     // Check if file exists
     if !file_path.exists() {
@@ -144,7 +149,7 @@ pub fn prepare_file_storage(
 
     let (file_path, virtual_file_path) =
         resolve_and_validate_file_path(server_root, current_virtual_path, filename)
-            .map_err(|e| StorageError::InvalidPath(e))?;
+            .map_err(StorageError::InvalidPath)?;
 
     // Check if parent directory exists
     if let Some(parent_dir) = file_path.parent() {
@@ -201,7 +206,7 @@ pub fn delete_file(
 
     let (file_path, virtual_file_path) =
         resolve_and_validate_file_path(server_root, current_virtual_path, filename)
-            .map_err(|e| StorageError::InvalidPath(e))?;
+            .map_err(StorageError::InvalidPath)?;
 
     // Verify file exists
     if !file_path.exists() {
@@ -230,6 +235,10 @@ pub fn delete_file(
                     thread::sleep(Duration::from_millis(100 * attempt as u64));
                     continue;
                 } else {
+                    // After retries, check if it's still a permission issue
+                    if e.kind() == std::io::ErrorKind::PermissionDenied {
+                        return Err(StorageError::PermissionDenied(virtual_file_path.clone()));
+                    }
                     error!(
                         "Failed to delete file {} (virtual: {}, real: {}): {}",
                         filename,
@@ -243,8 +252,7 @@ pub fn delete_file(
         }
     }
 
-    Err(StorageError::IoError(std::io::Error::new(
-        std::io::ErrorKind::Other,
+    Err(StorageError::IoError(std::io::Error::other(
         "Failed to delete file after retries",
     )))
 }

@@ -5,7 +5,7 @@
 
 use std::net::{SocketAddr, TcpListener};
 use std::str::FromStr;
-use log::{error, info, warn};
+use log::{error, info};
 
 use crate::error::TransferError;
 use crate::transfer::{ChannelRegistry, ChannelEntry};
@@ -18,8 +18,7 @@ pub fn setup_passive_mode(
     // Clean up any existing entry for this client (replacement behavior)
     if channel_registry.contains(&client_addr) {
         info!(
-            "Replacing existing data channel for client {} with new PASV connection",
-            client_addr
+            "Replacing existing data channel for client {client_addr} with new PASV connection"
         );
         channel_registry.cleanup_all(&client_addr);
     }
@@ -38,13 +37,13 @@ pub fn setup_passive_mode(
     
     // DEBUG: Verify listener was created and configured correctly
     match listener.local_addr() {
-        Ok(addr) => info!("DEBUG: PASV listener successfully created on {} (non-blocking mode)", addr),
-        Err(e) => error!("DEBUG: Failed to get PASV listener address: {}", e),
+        Ok(addr) => info!("DEBUG: PASV listener successfully created on {addr} (non-blocking mode)"),
+        Err(e) => error!("DEBUG: Failed to get PASV listener address: {e}"),
     }
     
     // Clone listener for registry
     let listener_clone = listener.try_clone()
-        .map_err(|e| TransferError::ListenerConfigurationFailed(e))?;
+        .map_err(TransferError::ListenerConfigurationFailed)?;
     
     // Create new channel entry for persistent data connection
     let mut entry = ChannelEntry::default();
@@ -57,8 +56,7 @@ pub fn setup_passive_mode(
     channel_registry.insert(client_addr, entry);
     
     info!(
-        "Client {} configured for passive mode - client will connect to server at {}",
-        client_addr, data_socket
+        "Client {client_addr} configured for passive mode - client will connect to server at {data_socket}"
     );
     
     Ok(data_socket)
@@ -73,8 +71,7 @@ pub fn setup_active_mode(
     // Clean up any existing entry for this client (replacement behavior)
     if channel_registry.contains(&client_addr) {
         info!(
-            "Replacing existing data channel for client {} with new PORT connection",
-            client_addr
+            "Replacing existing data channel for client {client_addr} with new PORT connection"
         );
         channel_registry.cleanup_all(&client_addr);
     }
@@ -110,8 +107,7 @@ pub fn setup_active_mode(
     channel_registry.insert(client_addr, entry);
     
     info!(
-        "Client {} configured for active mode - server will connect to client at {}",
-        client_addr, parsed_addr
+        "Client {client_addr} configured for active mode - server will connect to client at {parsed_addr}"
     );
     
     Ok(())
@@ -126,8 +122,7 @@ pub fn cleanup_data_stream_only(
     if let Some(entry) = channel_registry.get_mut(client_addr) {
         entry.cleanup_stream_only();
         info!(
-            "Cleaned up data stream for client {} - persistent setup maintained",
-            client_addr
+            "Cleaned up data stream for client {client_addr} - persistent setup maintained"
         );
     }
 }
@@ -141,8 +136,7 @@ pub fn cleanup_data_channel(
     if let Some(mut entry) = channel_registry.remove(client_addr) {
         entry.cleanup_all();
         info!(
-            "Completely cleaned up data channel for client {} - all resources freed",
-            client_addr
+            "Completely cleaned up data channel for client {client_addr} - all resources freed"
         );
     }
 }

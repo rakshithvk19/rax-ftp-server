@@ -6,7 +6,6 @@
 pub mod channel_registry;
 pub mod data_channel;
 pub mod file_ops;
-pub mod modes;
 pub mod operations;
 
 // Re-export key types and functions

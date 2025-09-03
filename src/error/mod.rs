@@ -6,5 +6,5 @@ pub mod handlers;
 pub mod types;
 
 pub use types::{
-    AuthError, ClientError, FtpServerError, NavigateError, StorageError, TransferError,
+    AuthError, NavigateError, StorageError, TransferError,
 };

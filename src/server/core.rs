@@ -29,18 +29,18 @@ impl Server {
 
         let listener = match TcpListener::bind(COMMAND_SOCKET).await {
             Ok(listener) => {
-                info!("Server bound to {}", COMMAND_SOCKET);
+                info!("Server bound to {COMMAND_SOCKET}");
                 listener
             }
             Err(e) => {
-                error!("Failed to bind to {}: {}", COMMAND_SOCKET, e);
-                panic!("Server startup failed on socket {}: {}", COMMAND_SOCKET, e);
+                error!("Failed to bind to {COMMAND_SOCKET}: {e}");
+                panic!("Server startup failed on socket {COMMAND_SOCKET}: {e}");
             }
         };
 
         // TODO: Ensure server root directory exists
         if let Err(e) = std::fs::create_dir_all(&config.server_root) {
-            warn!("Failed to create server root directory: {}", e);
+            warn!("Failed to create server root directory: {e}");
         } else {
             info!("Server root directory: {}", config.server_root_str());
         }
@@ -55,14 +55,13 @@ impl Server {
 
     pub async fn start(&self) {
         info!(
-            "Starting Rax FTP server on {} (max {} clients)",
-            COMMAND_SOCKET, MAX_CLIENTS
+            "Starting Rax FTP server on {COMMAND_SOCKET} (max {MAX_CLIENTS} clients)"
         );
 
         loop {
             match self.listener.accept().await {
                 Ok((stream, addr)) => {
-                    info!("Client {} connected to FTP server", addr);
+                    info!("Client {addr} connected to FTP server");
                     let client_registry = Arc::clone(&self.client_registry);
                     let channel_registry = Arc::clone(&self.channel_registry);
                     let config = Arc::clone(&self.config);
@@ -78,12 +77,12 @@ impl Server {
                         )
                         .await
                         {
-                            warn!("Failed to handle client {}: {}", addr, e);
+                            warn!("Failed to handle client {addr}: {e}");
                         }
                     });
                 }
                 Err(e) => {
-                    error!("Error accepting connection: {}", e);
+                    error!("Error accepting connection: {e}");
                 }
             }
         }

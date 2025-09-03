@@ -91,13 +91,12 @@ fn handle_cmd_quit(client: &mut Client, channel_registry: &mut ChannelRegistry) 
         .map(|addr| addr.to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    info!("Processing QUIT command for client {}", client_addr_str);
+    info!("Processing QUIT command for client {client_addr_str}");
 
     // Clean up any persistent data channels for this client
     if let Some(client_addr) = client.client_addr() {
         info!(
-            "Cleaning up data channels for quitting client {}",
-            client_addr
+            "Cleaning up data channels for quitting client {client_addr}"
         );
         transfer::cleanup_data_channel(channel_registry, client_addr);
     }
@@ -105,7 +104,7 @@ fn handle_cmd_quit(client: &mut Client, channel_registry: &mut ChannelRegistry) 
     // Logout the client directly
     client.logout();
 
-    info!("Client {} has quit successfully", client_addr_str);
+    info!("Client {client_addr_str} has quit successfully");
 
     CommandResult {
         status: CommandStatus::CloseConnection,
@@ -120,7 +119,7 @@ fn handle_cmd_user(client: &mut Client, username: &str) -> CommandResult {
             // Update client state based on successful validation
             client.set_user_valid(true);
             client.set_logged_in(false);
-            client.set_username(Some(username.to_string()));
+            let _ = client.set_username(Some(username.to_string()));
             CommandResult {
                 status: CommandStatus::Success,
                 message: Some("331 Password required\r\n".into()),
@@ -130,18 +129,18 @@ fn handle_cmd_user(client: &mut Client, username: &str) -> CommandResult {
             // Clear client state on validation failure
             client.set_user_valid(false);
             client.set_logged_in(false);
-            client.set_username(None);
+            let _ = client.set_username(None);
 
             let (code, message) = match error {
-                AuthError::InvalidUsername(u) => (530, format!("Invalid username: {}", u)),
-                AuthError::UserNotFound(u) => (530, format!("Unknown user '{}'", u)),
+                AuthError::InvalidUsername(u) => (530, format!("Invalid username: {u}")),
+                AuthError::UserNotFound(u) => (530, format!("Unknown user '{u}'")),
                 AuthError::MalformedInput(_) => (530, "Malformed input".to_string()),
-                _ => (530, "Authentication error".to_string()),
+                AuthError::InvalidPassword(u) => (530, format!("Invalid password for user: {u}")),
             };
 
             CommandResult {
                 status: CommandStatus::Failure(message.clone()),
-                message: Some(format!("{} {}\r\n", code, message)),
+                message: Some(format!("{code} {message}\r\n")),
             }
         }
     }
@@ -181,15 +180,15 @@ fn handle_cmd_pass(client: &mut Client, password: &str) -> CommandResult {
             client.set_logged_in(false);
 
             let (code, message) = match error {
-                AuthError::InvalidPassword(u) => (530, format!("Invalid password for user: {}", u)),
-                AuthError::UserNotFound(u) => (530, format!("Unknown user '{}'", u)),
+                AuthError::InvalidPassword(u) => (530, format!("Invalid password for user: {u}")),
+                AuthError::UserNotFound(u) => (530, format!("Unknown user '{u}'")),
                 AuthError::MalformedInput(_) => (530, "Malformed input".to_string()),
-                _ => (530, "Authentication failed".to_string()),
+                AuthError::InvalidUsername(u) => (530, format!("Invalid username: {u}")),
             };
 
             CommandResult {
                 status: CommandStatus::Failure(message.clone()),
-                message: Some(format!("{} {}\r\n", code, message)),
+                message: Some(format!("{code} {message}\r\n")),
             }
         }
     }
@@ -220,9 +219,7 @@ where
     }
 
     // 1. Send 150 IMMEDIATELY via callback
-    if let Err(_) =
-        send_intermediate("150 Opening ASCII mode data connection for file list\r\n").await
-    {
+    if send_intermediate("150 Opening ASCII mode data connection for file list\r\n").await.is_err() {
         return CommandResult {
             status: CommandStatus::Failure("Send failed".into()),
             message: Some("421 Service not available\r\n".into()),
@@ -247,17 +244,17 @@ where
         Err(error) => {
             let (code, message) = match error {
                 crate::error::StorageError::DirectoryNotFound(p) => {
-                    (550, format!("{}: Directory not found", p))
+                    (550, format!("{p}: Directory not found"))
                 }
                 crate::error::StorageError::PermissionDenied(p) => {
-                    (550, format!("{}: Permission denied", p))
+                    (550, format!("{p}: Permission denied"))
                 }
-                crate::error::StorageError::IoError(e) => (550, format!("I/O error: {}", e)),
+                crate::error::StorageError::IoError(e) => (550, format!("I/O error: {e}")),
                 _ => (550, "Directory listing failed".to_string()),
             };
             return CommandResult {
                 status: CommandStatus::Failure(message.clone()),
-                message: Some(format!("{} {}\r\n", code, message)),
+                message: Some(format!("{code} {message}\r\n")),
             };
         }
     };
@@ -305,13 +302,12 @@ fn handle_cmd_logout(client: &mut Client, channel_registry: &mut ChannelRegistry
         .map(|addr| addr.to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    info!("Processing LOGOUT command for client {}", client_addr_str);
+    info!("Processing LOGOUT command for client {client_addr_str}");
 
     // Check if user is actually logged in
     if !client.is_logged_in() {
         info!(
-            "LOGOUT attempted by client {} who is not logged in",
-            client_addr_str
+            "LOGOUT attempted by client {client_addr_str} who is not logged in"
         );
         return CommandResult {
             status: CommandStatus::Failure("Not logged in".into()),
@@ -322,8 +318,7 @@ fn handle_cmd_logout(client: &mut Client, channel_registry: &mut ChannelRegistry
     // Clean up any persistent data channels for this client
     if let Some(client_addr) = client.client_addr() {
         info!(
-            "Cleaning up data channels for logging out client {}",
-            client_addr
+            "Cleaning up data channels for logging out client {client_addr}"
         );
         transfer::cleanup_data_channel(channel_registry, client_addr);
     }
@@ -331,7 +326,7 @@ fn handle_cmd_logout(client: &mut Client, channel_registry: &mut ChannelRegistry
     // Logout the client directly
     client.logout();
 
-    info!("Client {} has logged out successfully", client_addr_str);
+    info!("Client {client_addr_str} has logged out successfully");
 
     CommandResult {
         status: CommandStatus::Success,
@@ -365,9 +360,7 @@ where
     }
 
     // 1. Send 150 IMMEDIATELY via callback
-    if let Err(_) =
-        send_intermediate("150 Opening BINARY mode data connection for file transfer\r\n").await
-    {
+    if send_intermediate("150 Opening BINARY mode data connection for file transfer\r\n").await.is_err() {
         return CommandResult {
             status: CommandStatus::Failure("Send failed".into()),
             message: Some("421 Service not available\r\n".into()),
@@ -384,17 +377,17 @@ where
         Err(error) => {
             let (code, message) = match error {
                 crate::error::StorageError::FileNotFound(p) => {
-                    (550, format!("{}: File not found", p))
+                    (550, format!("{p}: File not found"))
                 }
                 crate::error::StorageError::PermissionDenied(p) => {
-                    (550, format!("{}: Permission denied", p))
+                    (550, format!("{p}: Permission denied"))
                 }
-                crate::error::StorageError::IoError(e) => (550, format!("I/O error: {}", e)),
+                crate::error::StorageError::IoError(e) => (550, format!("I/O error: {e}")),
                 _ => (550, "File retrieval failed".to_string()),
             };
             return CommandResult {
                 status: CommandStatus::Failure(message.clone()),
-                message: Some(format!("{} {}\r\n", code, message)),
+                message: Some(format!("{code} {message}\r\n")),
             };
         }
     };
@@ -477,9 +470,7 @@ where
     }
 
     // 1. Send 150 IMMEDIATELY via callback
-    if let Err(_) =
-        send_intermediate("150 Opening BINARY mode data connection for file transfer\r\n").await
-    {
+    if send_intermediate("150 Opening BINARY mode data connection for file transfer\r\n").await.is_err() {
         return CommandResult {
             status: CommandStatus::Failure("Send failed".into()),
             message: Some("421 Service not available\r\n".into()),
@@ -496,20 +487,20 @@ where
         Err(error) => {
             let (code, message) = match error {
                 crate::error::StorageError::FileAlreadyExists(p) => {
-                    (550, format!("{}: File already exists", p))
+                    (550, format!("{p}: File already exists"))
                 }
                 crate::error::StorageError::PermissionDenied(p) => {
-                    (550, format!("{}: Permission denied", p))
+                    (550, format!("{p}: Permission denied"))
                 }
                 crate::error::StorageError::UploadInProgress(p) => {
-                    (550, format!("{}: Upload already in progress", p))
+                    (550, format!("{p}: Upload already in progress"))
                 }
-                crate::error::StorageError::IoError(e) => (550, format!("I/O error: {}", e)),
+                crate::error::StorageError::IoError(e) => (550, format!("I/O error: {e}")),
                 _ => (550, "File storage preparation failed".to_string()),
             };
             return CommandResult {
                 status: CommandStatus::Failure(message.clone()),
-                message: Some(format!("{} {}\r\n", code, message)),
+                message: Some(format!("{code} {message}\r\n")),
             };
         }
     };
@@ -587,17 +578,17 @@ fn handle_cmd_del(client: &Client, filename: &str, config: &ServerConfig) -> Com
         Err(error) => {
             let (code, message) = match error {
                 crate::error::StorageError::FileNotFound(p) => {
-                    (550, format!("{}: File not found", p))
+                    (550, format!("{p}: File not found"))
                 }
                 crate::error::StorageError::PermissionDenied(p) => {
-                    (550, format!("{}: Permission denied", p))
+                    (550, format!("{p}: Permission denied"))
                 }
-                crate::error::StorageError::IoError(e) => (550, format!("I/O error: {}", e)),
+                crate::error::StorageError::IoError(e) => (550, format!("I/O error: {e}")),
                 _ => (550, "File deletion failed".to_string()),
             };
             CommandResult {
                 status: CommandStatus::Failure(message.clone()),
-                message: Some(format!("{} {}\r\n", code, message)),
+                message: Some(format!("{code} {message}\r\n")),
             }
         }
     }
@@ -617,7 +608,7 @@ fn handle_cmd_cwd(client: &mut Client, path: &str, config: &ServerConfig) -> Com
     match navigate::change_directory(&config.server_root, client.current_virtual_path(), path) {
         Ok(new_virtual_path) => {
             // Update client's virtual path
-            client.set_current_virtual_path(new_virtual_path.clone());
+            let _ = client.set_current_virtual_path(new_virtual_path.clone());
 
             info!(
                 "Client {} changed directory to {}",
@@ -636,22 +627,22 @@ fn handle_cmd_cwd(client: &mut Client, path: &str, config: &ServerConfig) -> Com
         Err(error) => {
             let (code, message) = match error {
                 crate::error::NavigateError::DirectoryNotFound(p) => {
-                    (550, format!("{}: Directory not found", p))
+                    (550, format!("{p}: Directory not found"))
                 }
                 crate::error::NavigateError::NotADirectory(p) => {
-                    (550, format!("{}: Not a directory", p))
+                    (550, format!("{p}: Not a directory"))
                 }
                 crate::error::NavigateError::PermissionDenied(p) => {
-                    (550, format!("{}: Permission denied", p))
+                    (550, format!("{p}: Permission denied"))
                 }
                 crate::error::NavigateError::PathTraversal(p) => {
-                    (550, format!("Path traversal attempt: {}", p))
+                    (550, format!("Path traversal attempt: {p}"))
                 }
                 _ => (550, "Directory change failed".to_string()),
             };
             CommandResult {
                 status: CommandStatus::Failure(message.clone()),
-                message: Some(format!("{} {}\r\n", code, message)),
+                message: Some(format!("{code} {message}\r\n")),
             }
         }
     }
@@ -682,28 +673,27 @@ fn handle_cmd_pasv(client: &mut Client, channel_registry: &mut ChannelRegistry) 
         Ok(data_socket) => {
             client.set_data_channel_init(true);
             info!(
-                "Sending PASV response to client {}: 227 Entering Passive Mode ({})",
-                client_addr, data_socket
+                "Sending PASV response to client {client_addr}: 227 Entering Passive Mode ({data_socket})"
             );
             CommandResult {
                 status: CommandStatus::Success,
-                message: Some(format!("227 Entering Passive Mode ({})\r\n", data_socket)),
+                message: Some(format!("227 Entering Passive Mode ({data_socket})\r\n")),
             }
         }
         Err(error) => {
             let (code, message) = match error {
                 TransferError::NoAvailablePort => (425, "No available port".to_string()),
                 TransferError::PortBindingFailed(addr, e) => {
-                    (425, format!("Can't bind to {}: {}", addr, e))
+                    (425, format!("Can't bind to {addr}: {e}"))
                 }
                 TransferError::ListenerConfigurationFailed(e) => {
-                    (425, format!("Listener config failed: {}", e))
+                    (425, format!("Listener config failed: {e}"))
                 }
                 _ => (425, "Passive mode setup failed".to_string()),
             };
             CommandResult {
                 status: CommandStatus::Failure(message.clone()),
-                message: Some(format!("{} {}\r\n", code, message)),
+                message: Some(format!("{code} {message}\r\n")),
             }
         }
     }
@@ -747,17 +737,17 @@ fn handle_cmd_port(
                 TransferError::InvalidPortCommand(msg) => (501, msg),
                 TransferError::IpMismatch { expected, provided } => (
                     501,
-                    format!("IP mismatch: expected {}, got {}", expected, provided),
+                    format!("IP mismatch: expected {expected}, got {provided}"),
                 ),
                 TransferError::InvalidPortRange(port) => (
                     501,
-                    format!("Port {} out of range (must be 1024-65535)", port),
+                    format!("Port {port} out of range (must be 1024-65535)"),
                 ),
                 _ => (425, "Active mode setup failed".to_string()),
             };
             CommandResult {
                 status: CommandStatus::Failure(message.clone()),
-                message: Some(format!("{} {}\r\n", code, message)),
+                message: Some(format!("{code} {message}\r\n")),
             }
         }
     }

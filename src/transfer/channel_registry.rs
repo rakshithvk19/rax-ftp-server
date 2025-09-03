@@ -29,31 +29,9 @@ impl ChannelEntry {
         self.data_socket.as_ref()
     }
 
-    /// Returns a reference to the TCP stream if present.
-    pub fn data_stream(&self) -> Option<&TcpStream> {
-        self.data_stream.as_ref()
-    }
-
     /// Returns a reference to the passive mode TCP listener if present.
     pub fn listener(&self) -> Option<&TcpListener> {
         self.listener.as_ref()
-    }
-
-    /// Returns the owner IP address if present.
-    pub fn owner_ip(&self) -> Option<IpAddr> {
-        self.owner_ip
-    }
-
-    // --- Mutable Accessors ---
-
-    /// Returns a mutable reference to the data socket address if present.
-    pub fn data_socket_mut(&mut self) -> Option<&mut SocketAddr> {
-        self.data_socket.as_mut()
-    }
-
-    /// Returns a mutable reference to the TCP stream if present.
-    pub fn data_stream_mut(&mut self) -> Option<&mut TcpStream> {
-        self.data_stream.as_mut()
     }
 
     /// Returns a mutable reference to the passive mode listener if present.
@@ -83,39 +61,6 @@ impl ChannelEntry {
         self.owner_ip = ip;
     }
 
-    // --- Take Ownership Methods ---
-
-    /// Takes ownership of the data socket out of the entry, leaving None behind.
-    pub fn take_data_socket(&mut self) -> Option<SocketAddr> {
-        self.data_socket.take()
-    }
-
-    /// Takes ownership of the data stream out of the entry, leaving None behind.
-    pub fn take_data_stream(&mut self) -> Option<TcpStream> {
-        self.data_stream.take()
-    }
-
-    /// Takes ownership of the listener out of the entry, leaving None behind.
-    pub fn take_listener(&mut self) -> Option<TcpListener> {
-        self.listener.take()
-    }
-
-    // --- Validation Methods ---
-
-    /// Checks if the given IP address is allowed to use this channel.
-    pub fn is_client_allowed(&self, client_ip: IpAddr) -> bool {
-        match self.owner_ip {
-            Some(owner) => owner == client_ip,
-            None => true, // No owner set, allow any client
-        }
-    }
-
-    /// Checks if this entry has persistent connection info available.
-    pub fn has_persistent_setup(&self) -> bool {
-        self.data_socket.is_some() || self.listener.is_some()
-    }
-
-    // --- Cleanup Methods ---
 
     /// Cleans up only the data stream, keeping the persistent setup intact.
     pub fn cleanup_stream_only(&mut self) {
@@ -145,13 +90,6 @@ impl ChannelRegistry {
     /// The server listens on these ports to accept incoming client data connections.
     pub const DATA_PORT_RANGE: std::ops::Range<u16> = 2122..2222;
 
-    /// Creates a new, empty ChannelRegistry.
-    pub fn new() -> Self {
-        Self {
-            registry: HashMap::new(),
-        }
-    }
-
     /// Inserts or replaces the data channel entry associated with the given client address.
     ///
     /// If the provided data socket is already in use by another client, it logs a warning and skips insertion.
@@ -159,8 +97,7 @@ impl ChannelRegistry {
         if let Some(socket) = entry.data_socket {
             if self.is_socket_taken(&socket) {
                 warn!(
-                    "Attempted to insert a data socket already in use: {}",
-                    socket
+                    "Attempted to insert a data socket already in use: {socket}"
                 );
                 return;
             }
@@ -173,11 +110,6 @@ impl ChannelRegistry {
         self.registry.remove(addr)
     }
 
-    /// Returns an immutable reference to the data channel entry for a client address, if present.
-    pub fn get(&self, addr: &SocketAddr) -> Option<&ChannelEntry> {
-        self.registry.get(addr)
-    }
-
     /// Returns a mutable reference to the data channel entry for a client address, if present.
     pub fn get_mut(&mut self, addr: &SocketAddr) -> Option<&mut ChannelEntry> {
         self.registry.get_mut(addr)
@@ -188,16 +120,11 @@ impl ChannelRegistry {
         self.registry.contains_key(addr)
     }
 
-    /// Returns a list of all client addresses currently registered.
-    pub fn list_addresses(&self) -> Vec<SocketAddr> {
-        self.registry.keys().cloned().collect()
-    }
-
     /// Attempts to find the next available socket address in the configured PASV port range
     /// that is not currently assigned to any client's data socket.
     pub fn next_available_socket(&self) -> Option<SocketAddr> {
         for port in Self::DATA_PORT_RANGE {
-            let data_socket: SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
+            let data_socket: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
             if !self.is_socket_taken(&data_socket) {
                 return Some(data_socket);
             }
@@ -212,24 +139,10 @@ impl ChannelRegistry {
             .any(|entry| entry.data_socket.as_ref() == Some(addr))
     }
 
-    /// Cleans up only the data stream for a client, keeping persistent setup intact.
-    pub fn cleanup_stream_only(&mut self, client_addr: &SocketAddr) {
-        if let Some(entry) = self.get_mut(client_addr) {
-            entry.cleanup_stream_only();
-        }
-    }
-
     /// Completely cleans up all data channel resources for a client.
     pub fn cleanup_all(&mut self, client_addr: &SocketAddr) {
         if let Some(mut entry) = self.remove(client_addr) {
             entry.cleanup_all();
         }
-    }
-
-    /// Checks if a client has a persistent data channel setup available.
-    pub fn has_persistent_setup(&self, client_addr: &SocketAddr) -> bool {
-        self.get(client_addr)
-            .map(|entry| entry.has_persistent_setup())
-            .unwrap_or(false)
     }
 }

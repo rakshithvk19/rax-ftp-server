@@ -8,6 +8,7 @@
 /// Each variant corresponds to a standard FTP command or custom extensions.
 /// Commands that require arguments store them as `String` variants.
 #[derive(Debug, PartialEq)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum Command {
     QUIT,
     LIST,
@@ -31,13 +32,6 @@ pub enum CommandStatus {
     Failure(String),
     CloseConnection,
 }
-
-/// Additional data associated with a command result.
-// #[derive(Debug)]
-// pub enum CommandData {
-//     /// Placeholder variant - currently unused
-//     None,
-// }
 
 /// Struct encapsulating the full result of a command execution.
 pub struct CommandResult {
