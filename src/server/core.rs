@@ -54,9 +54,7 @@ impl Server {
     }
 
     pub async fn start(&self) {
-        info!(
-            "Starting Rax FTP server on {COMMAND_SOCKET} (max {MAX_CLIENTS} clients)"
-        );
+        info!("Starting Rax FTP server on {COMMAND_SOCKET} (max {MAX_CLIENTS} clients)");
 
         loop {
             match self.listener.accept().await {

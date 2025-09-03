@@ -61,7 +61,6 @@ impl ChannelEntry {
         self.owner_ip = ip;
     }
 
-
     /// Cleans up only the data stream, keeping the persistent setup intact.
     pub fn cleanup_stream_only(&mut self) {
         if let Some(stream) = self.data_stream.take() {
@@ -96,9 +95,7 @@ impl ChannelRegistry {
     pub fn insert(&mut self, addr: SocketAddr, entry: ChannelEntry) {
         if let Some(socket) = entry.data_socket {
             if self.is_socket_taken(&socket) {
-                warn!(
-                    "Attempted to insert a data socket already in use: {socket}"
-                );
+                warn!("Attempted to insert a data socket already in use: {socket}");
                 return;
             }
         }

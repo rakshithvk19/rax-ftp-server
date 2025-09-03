@@ -7,7 +7,7 @@
 
 use crate::protocol::CommandStatus;
 use log::{error, info, warn};
-use std::fs::{File, remove_file, rename};
+use std::fs::{remove_file, rename, File};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::thread;
@@ -26,9 +26,7 @@ pub fn handle_file_upload(
     final_filename: &str,
     temp_filename: &str,
 ) -> Result<(CommandStatus, &'static str), (CommandStatus, &'static str)> {
-    info!(
-        "Starting file upload: {temp_filename} -> {final_filename}"
-    );
+    info!("Starting file upload: {temp_filename} -> {final_filename}");
 
     // Create temporary file for atomic upload
     let mut temp_file = match File::create(temp_filename) {
@@ -128,9 +126,7 @@ pub fn handle_file_upload(
             Ok((CommandStatus::Success, "226 Transfer complete\r\n"))
         }
         Err(e) => {
-            error!(
-                "Failed to rename {temp_filename} to {final_filename}: {e}"
-            );
+            error!("Failed to rename {temp_filename} to {final_filename}: {e}");
             // Clean up temporary file if rename failed
             let _ = remove_file(temp_filename);
             Err((
@@ -190,9 +186,7 @@ pub fn handle_file_download(
                     thread::sleep(Duration::from_millis(100 * retries as u64));
                 }
                 Err(e) => {
-                    error!(
-                        "Write failure to data stream after {MAX_RETRIES} retries: {e}"
-                    );
+                    error!("Write failure to data stream after {MAX_RETRIES} retries: {e}");
                     return Err((
                         CommandStatus::Failure("426 Connection closed; transfer aborted".into()),
                         "426 Connection closed; transfer aborted\r\n",
@@ -212,9 +206,7 @@ pub fn handle_file_download(
         ));
     }
 
-    info!(
-        "File download completed successfully: {filename} ({total_bytes_sent} bytes)"
-    );
+    info!("File download completed successfully: {filename} ({total_bytes_sent} bytes)");
 
     Ok((CommandStatus::Success, "226 Transfer complete\r\n"))
 }

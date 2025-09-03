@@ -95,9 +95,7 @@ fn handle_cmd_quit(client: &mut Client, channel_registry: &mut ChannelRegistry) 
 
     // Clean up any persistent data channels for this client
     if let Some(client_addr) = client.client_addr() {
-        info!(
-            "Cleaning up data channels for quitting client {client_addr}"
-        );
+        info!("Cleaning up data channels for quitting client {client_addr}");
         transfer::cleanup_data_channel(channel_registry, client_addr);
     }
 
@@ -219,7 +217,10 @@ where
     }
 
     // 1. Send 150 IMMEDIATELY via callback
-    if send_intermediate("150 Opening ASCII mode data connection for file list\r\n").await.is_err() {
+    if send_intermediate("150 Opening ASCII mode data connection for file list\r\n")
+        .await
+        .is_err()
+    {
         return CommandResult {
             status: CommandStatus::Failure("Send failed".into()),
             message: Some("421 Service not available\r\n".into()),
@@ -306,9 +307,7 @@ fn handle_cmd_logout(client: &mut Client, channel_registry: &mut ChannelRegistry
 
     // Check if user is actually logged in
     if !client.is_logged_in() {
-        info!(
-            "LOGOUT attempted by client {client_addr_str} who is not logged in"
-        );
+        info!("LOGOUT attempted by client {client_addr_str} who is not logged in");
         return CommandResult {
             status: CommandStatus::Failure("Not logged in".into()),
             message: Some("530 User not logged in\r\n".into()),
@@ -317,9 +316,7 @@ fn handle_cmd_logout(client: &mut Client, channel_registry: &mut ChannelRegistry
 
     // Clean up any persistent data channels for this client
     if let Some(client_addr) = client.client_addr() {
-        info!(
-            "Cleaning up data channels for logging out client {client_addr}"
-        );
+        info!("Cleaning up data channels for logging out client {client_addr}");
         transfer::cleanup_data_channel(channel_registry, client_addr);
     }
 
@@ -360,7 +357,10 @@ where
     }
 
     // 1. Send 150 IMMEDIATELY via callback
-    if send_intermediate("150 Opening BINARY mode data connection for file transfer\r\n").await.is_err() {
+    if send_intermediate("150 Opening BINARY mode data connection for file transfer\r\n")
+        .await
+        .is_err()
+    {
         return CommandResult {
             status: CommandStatus::Failure("Send failed".into()),
             message: Some("421 Service not available\r\n".into()),
@@ -470,7 +470,10 @@ where
     }
 
     // 1. Send 150 IMMEDIATELY via callback
-    if send_intermediate("150 Opening BINARY mode data connection for file transfer\r\n").await.is_err() {
+    if send_intermediate("150 Opening BINARY mode data connection for file transfer\r\n")
+        .await
+        .is_err()
+    {
         return CommandResult {
             status: CommandStatus::Failure("Send failed".into()),
             message: Some("421 Service not available\r\n".into()),

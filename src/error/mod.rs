@@ -5,6 +5,4 @@
 pub mod handlers;
 pub mod types;
 
-pub use types::{
-    AuthError, NavigateError, StorageError, TransferError,
-};
+pub use types::{AuthError, NavigateError, StorageError, TransferError};

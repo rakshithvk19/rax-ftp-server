@@ -163,9 +163,7 @@ pub async fn handle_client(
         let mut channel_registry_guard = channel_registry.lock().await;
         if let Some(entry) = channel_registry_guard.remove(&client_addr) {
             drop(entry);
-            info!(
-                "Cleaned up data channel for disconnecting client {client_addr}"
-            );
+            info!("Cleaned up data channel for disconnecting client {client_addr}");
         } else {
             info!("No data channel to clean up for client {client_addr}");
         }
@@ -175,9 +173,7 @@ pub async fn handle_client(
     {
         let mut clients_guard = clients.lock().await;
         if clients_guard.remove(&client_addr).is_some() {
-            info!(
-                "Client {client_addr} removed from registry and disconnected"
-            );
+            info!("Client {client_addr} removed from registry and disconnected");
         } else {
             info!("Client {client_addr} was already removed from registry");
         }

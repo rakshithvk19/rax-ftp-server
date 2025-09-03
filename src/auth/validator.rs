@@ -8,9 +8,7 @@ use crate::error::AuthError;
 
 /// Performs basic input sanitation to check for malicious or malformed usernames/passwords.
 fn is_valid_input(input: &str) -> bool {
-    !input.trim().is_empty()
-        && input.len() <= 64
-        && !input.contains(['\r', '\n', '\0'])
+    !input.trim().is_empty() && input.len() <= 64 && !input.contains(['\r', '\n', '\0'])
 }
 
 /// Validates that the given username exists in the credential store.
@@ -19,7 +17,7 @@ pub fn validate_user(username: &str) -> Result<(), AuthError> {
     if username.contains(['@', '#', '$', '%']) || username.starts_with(char::is_numeric) {
         return Err(AuthError::InvalidUsername(username.to_string()));
     }
-    
+
     if !is_valid_input(username) {
         return Err(AuthError::MalformedInput("Invalid username format".into()));
     }
@@ -32,10 +30,7 @@ pub fn validate_user(username: &str) -> Result<(), AuthError> {
 }
 
 /// Validates that the provided password matches the stored password for the username.
-pub fn validate_password(
-    username: &str,
-    password: &str,
-) -> Result<(), AuthError> {
+pub fn validate_password(username: &str, password: &str) -> Result<(), AuthError> {
     if !is_valid_input(password) {
         return Err(AuthError::MalformedInput("Invalid password format".into()));
     }
