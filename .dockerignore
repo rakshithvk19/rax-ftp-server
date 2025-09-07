@@ -1,0 +1,41 @@
+# Build artifacts
+target/
+test_build/
+.cargo/
+
+# Version control
+.git/
+.gitignore
+
+# Runtime directories (volume mounted)
+server_root/
+
+# Development files
+documentation/
+tests/
+clippy.txt
+TODO.md
+.env.example
+
+# Environment files (secrets)
+.env
+.env.local
+.env.*
+!.env.example
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.log
+*.tmp
+*.bak
+**/*.rs.bk

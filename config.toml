@@ -1,0 +1,54 @@
+# RAX FTP Server Configuration
+# 
+# This file contains all configuration values for the RAX FTP server.
+# Values in the DEPLOYMENT section can be overridden with RAX_FTP_ environment variables.
+# Values in the INTERNAL SETTINGS section are TOML-only (no environment override).
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DEPLOYMENT CONFIGURATION (Environment Override Supported)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# IP address to bind the FTP control connection
+# Use "0.0.0.0" for Docker containers to accept external connections
+# Environment: RAX_FTP_BIND_ADDRESS
+bind_address = "127.0.0.1"
+
+# Port for FTP control connection
+# Environment: RAX_FTP_CONTROL_PORT
+control_port = 2121
+
+# Port range for PASV (passive) data connections
+# Ensure this range is available and mapped in Docker
+# Environment: RAX_FTP_DATA_PORT_MIN, RAX_FTP_DATA_PORT_MAX
+data_port_min = 2122
+data_port_max = 2222
+
+# Maximum number of concurrent clients
+# Environment: RAX_FTP_MAX_CLIENTS
+max_clients = 10
+
+# Root directory for FTP file operations
+# Use absolute path like "/app/server_root" for Docker containers
+# Environment: RAX_FTP_SERVER_ROOT
+server_root = "./server_root"
+
+# Maximum file upload size in megabytes
+# Environment: RAX_FTP_MAX_FILE_SIZE_MB
+max_file_size_mb = 100
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# INTERNAL SETTINGS (TOML Only - No Environment Override)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Performance settings
+buffer_size = 8192
+connection_timeout_secs = 10
+max_retries = 3
+
+# Security and validation settings
+max_command_length = 512
+max_directory_depth = 3
+max_username_length = 64
+min_client_port = 1024
+
+

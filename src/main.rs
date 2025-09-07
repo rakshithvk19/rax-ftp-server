@@ -6,6 +6,7 @@ use log::info;
 
 mod auth;
 mod client;
+mod config;
 mod error;
 mod navigate;
 mod protocol;

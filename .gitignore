@@ -32,4 +32,8 @@ Thumbs.db
 /test_temp
 TODO.md
 
-server_root/    
+server_root/
+
+# Environment files (contain secrets)
+.env
+.env.local

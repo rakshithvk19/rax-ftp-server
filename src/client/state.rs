@@ -3,6 +3,7 @@
 //! Defines the `Client` struct and associated methods to manage FTP client state,
 //! including authentication status, connection address, and data channel initialization.
 
+use crate::config::StartupConfig;
 use std::net::SocketAddr;
 
 /// Represents the state of a connected FTP client.
@@ -124,14 +125,21 @@ impl Client {
     }
 
     /// Sets the username of the client with validation
-    pub fn set_username(&mut self, username: Option<String>) -> Result<(), String> {
+    pub fn set_username(
+        &mut self,
+        username: Option<String>,
+        config: &StartupConfig,
+    ) -> Result<(), String> {
         if let Some(ref new_username) = username {
             // Validate username
             if new_username.is_empty() {
                 return Err("Username cannot be empty".to_string());
             }
-            if new_username.len() > 32 {
-                return Err("Username too long (max 32 characters)".to_string());
+            if new_username.len() > config.max_username_length {
+                return Err(format!(
+                    "Username too long (max {} characters)",
+                    config.max_username_length
+                ));
             }
             if new_username.contains('\0')
                 || new_username.contains('\n')

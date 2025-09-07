@@ -9,12 +9,10 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
 use crate::client::Client;
+use crate::config::{SharedRuntimeConfig, StartupConfig};
 use crate::protocol::handle_command;
-use crate::protocol::{parse_command, CommandStatus};
-use crate::server::config::ServerConfig;
+use crate::protocol::{CommandStatus, parse_command};
 use crate::transfer::ChannelRegistry;
-
-const MAX_COMMAND_LENGTH: usize = 512;
 
 /// Handles FTP client session using Tokio async runtime.
 ///
@@ -26,7 +24,8 @@ pub async fn handle_client(
     clients: Arc<Mutex<HashMap<SocketAddr, Client>>>,
     client_addr: SocketAddr,
     channel_registry: Arc<Mutex<ChannelRegistry>>,
-    config: Arc<ServerConfig>,
+    startup_config: Arc<StartupConfig>,
+    runtime_config: SharedRuntimeConfig,
 ) {
     let (read_half, write_half) = cmd_stream.into_split();
     let mut reader = BufReader::new(read_half);
@@ -54,7 +53,7 @@ pub async fn handle_client(
                 break;
             }
             Ok(_) => {
-                if line.len() > MAX_COMMAND_LENGTH {
+                if line.len() > startup_config.max_command_length {
                     error!(
                         "Command too long ({} chars) from client {}",
                         line.len(),
@@ -83,7 +82,8 @@ pub async fn handle_client(
                             client,
                             &command,
                             &mut channel_registry_guard,
-                            &config,
+                            &startup_config,
+                            &runtime_config,
                             &send_intermediate,
                         )
                         .await;

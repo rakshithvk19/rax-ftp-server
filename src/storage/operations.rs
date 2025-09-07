@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 
+use crate::config::StartupConfig;
 use crate::error::StorageError;
 use crate::storage::validation::{resolve_and_validate_file_path, virtual_to_real_path};
 
@@ -109,13 +110,14 @@ pub fn prepare_file_retrieval(
     server_root: &Path,
     current_virtual_path: &str,
     filename: &str,
+    config: &StartupConfig,
 ) -> Result<PathBuf, StorageError> {
     if filename.is_empty() {
         return Err(StorageError::InvalidPath("Empty filename".into()));
     }
 
     let (file_path, virtual_file_path) =
-        resolve_and_validate_file_path(server_root, current_virtual_path, filename)
+        resolve_and_validate_file_path(server_root, current_virtual_path, filename, config)
             .map_err(StorageError::InvalidPath)?;
 
     // Check if file exists
@@ -142,13 +144,14 @@ pub fn prepare_file_storage(
     server_root: &Path,
     current_virtual_path: &str,
     filename: &str,
+    config: &StartupConfig,
 ) -> Result<(PathBuf, PathBuf), StorageError> {
     if filename.is_empty() {
         return Err(StorageError::InvalidPath("Empty filename".into()));
     }
 
     let (file_path, virtual_file_path) =
-        resolve_and_validate_file_path(server_root, current_virtual_path, filename)
+        resolve_and_validate_file_path(server_root, current_virtual_path, filename, config)
             .map_err(StorageError::InvalidPath)?;
 
     // Check if parent directory exists
@@ -199,13 +202,14 @@ pub fn delete_file(
     server_root: &Path,
     current_virtual_path: &str,
     filename: &str,
+    config: &StartupConfig,
 ) -> Result<(), StorageError> {
     if filename.is_empty() {
         return Err(StorageError::InvalidPath("Empty filename".into()));
     }
 
     let (file_path, virtual_file_path) =
-        resolve_and_validate_file_path(server_root, current_virtual_path, filename)
+        resolve_and_validate_file_path(server_root, current_virtual_path, filename, config)
             .map_err(StorageError::InvalidPath)?;
 
     // Verify file exists

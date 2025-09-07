@@ -2,11 +2,9 @@
 //!
 //! Handles comprehensive path validation, security checks, and path resolution for FTP operations.
 
+use crate::config::StartupConfig;
 use log::warn;
 use std::path::{Path, PathBuf};
-
-/// Maximum allowed subdirectory depth (0 = root, 1 = one level deep, etc.)
-pub const MAX_DIRECTORY_DEPTH: usize = 3;
 
 /// Normalize path separators to Unix style and validate path structure
 pub fn normalize_path(path: &str) -> Result<String, String> {
@@ -33,7 +31,7 @@ pub fn normalize_path(path: &str) -> Result<String, String> {
 }
 
 /// Validate directory depth doesn't exceed maximum allowed
-pub fn validate_directory_depth(path: &str) -> Result<(), String> {
+pub fn validate_directory_depth(path: &str, config: &StartupConfig) -> Result<(), String> {
     let depth = if path == "/" {
         0
     } else {
@@ -43,9 +41,10 @@ pub fn validate_directory_depth(path: &str) -> Result<(), String> {
             .count()
     };
 
-    if depth > MAX_DIRECTORY_DEPTH {
+    if depth > config.max_directory_depth {
         return Err(format!(
-            "Directory depth {depth} exceeds maximum allowed depth of {MAX_DIRECTORY_DEPTH}"
+            "Directory depth {depth} exceeds maximum allowed depth of {}",
+            config.max_directory_depth
         ));
     }
 
@@ -85,12 +84,12 @@ pub fn validate_path_component(component: &str) -> Result<(), String> {
 }
 
 /// Comprehensive path validation
-pub fn validate_path(path: &str) -> Result<String, String> {
+pub fn validate_path(path: &str, config: &StartupConfig) -> Result<String, String> {
     // Step 1: Normalize path separators
     let normalized = normalize_path(path)?;
 
     // Step 2: Validate directory depth
-    validate_directory_depth(&normalized)?;
+    validate_directory_depth(&normalized, config)?;
 
     // Step 3: Validate each path component
     if normalized != "/" {
@@ -109,7 +108,11 @@ pub fn validate_path(path: &str) -> Result<String, String> {
 }
 
 /// Resolve a file path relative to current virtual directory
-pub fn resolve_file_path(current_virtual_path: &str, file_path: &str) -> Result<String, String> {
+pub fn resolve_file_path(
+    current_virtual_path: &str,
+    file_path: &str,
+    config: &StartupConfig,
+) -> Result<String, String> {
     let file_path = file_path.trim();
 
     if file_path.is_empty() {
@@ -119,7 +122,7 @@ pub fn resolve_file_path(current_virtual_path: &str, file_path: &str) -> Result<
     // Determine the virtual file path
     let virtual_file_path = if file_path.starts_with('/') || file_path.starts_with('\\') {
         // Absolute path
-        validate_path(file_path)?
+        validate_path(file_path, config)?
     } else {
         // Relative path - resolve relative to current virtual directory
         let combined = if current_virtual_path.ends_with('/') {
@@ -127,7 +130,7 @@ pub fn resolve_file_path(current_virtual_path: &str, file_path: &str) -> Result<
         } else {
             format!("{current_virtual_path}/{file_path}")
         };
-        validate_path(&combined)?
+        validate_path(&combined, config)?
     };
 
     Ok(virtual_file_path)
@@ -137,6 +140,7 @@ pub fn resolve_file_path(current_virtual_path: &str, file_path: &str) -> Result<
 pub fn resolve_cwd_path(
     current_virtual_path: &str,
     requested_path: &str,
+    config: &StartupConfig,
 ) -> Result<String, String> {
     let requested = requested_path.trim();
 
@@ -151,7 +155,7 @@ pub fn resolve_cwd_path(
 
     // Handle absolute paths
     if requested.starts_with('/') || requested.starts_with('\\') {
-        return validate_path(requested);
+        return validate_path(requested, config);
     }
 
     // Handle relative paths
@@ -161,7 +165,7 @@ pub fn resolve_cwd_path(
         format!("{current_virtual_path}/{requested}")
     };
 
-    validate_path(&combined)
+    validate_path(&combined, config)
 }
 
 /// Convert virtual path to real filesystem path within server_root
@@ -215,9 +219,10 @@ pub fn resolve_and_validate_file_path(
     server_root: &Path,
     current_virtual_path: &str,
     file_path: &str,
+    config: &StartupConfig,
 ) -> Result<(PathBuf, String), String> {
     // Resolve virtual file path
-    let virtual_file_path = resolve_file_path(current_virtual_path, file_path)?;
+    let virtual_file_path = resolve_file_path(current_virtual_path, file_path, config)?;
 
     // Convert to real path
     let real_path = virtual_to_real_path(server_root, &virtual_file_path);

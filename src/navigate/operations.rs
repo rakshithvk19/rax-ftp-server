@@ -1,5 +1,6 @@
 //! Navigation operations implementation
 
+use crate::config::StartupConfig;
 use crate::error::NavigateError;
 use std::path::Path;
 
@@ -8,6 +9,7 @@ pub fn change_directory(
     server_root: &Path,
     current_virtual_path: &str,
     target_path: &str,
+    config: &StartupConfig,
 ) -> Result<String, NavigateError> {
     use crate::storage::validation::{resolve_cwd_path, virtual_to_real_path};
 
@@ -17,8 +19,8 @@ pub fn change_directory(
     }
 
     // Resolve the new virtual path
-    let new_virtual_path =
-        resolve_cwd_path(current_virtual_path, target_path).map_err(NavigateError::InvalidPath)?;
+    let new_virtual_path = resolve_cwd_path(current_virtual_path, target_path, config)
+        .map_err(NavigateError::InvalidPath)?;
 
     // Convert to real path and verify it exists
     let real_path = virtual_to_real_path(server_root, &new_virtual_path);

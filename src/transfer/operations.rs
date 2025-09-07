@@ -7,6 +7,7 @@ use log::{error, info};
 use std::net::{SocketAddr, TcpListener};
 use std::str::FromStr;
 
+use crate::config::StartupConfig;
 use crate::error::TransferError;
 use crate::transfer::{ChannelEntry, ChannelRegistry};
 
@@ -14,6 +15,7 @@ use crate::transfer::{ChannelEntry, ChannelRegistry};
 pub fn setup_passive_mode(
     channel_registry: &mut ChannelRegistry,
     client_addr: SocketAddr,
+    config: &StartupConfig,
 ) -> Result<SocketAddr, TransferError> {
     // Clean up any existing entry for this client (replacement behavior)
     if channel_registry.contains(&client_addr) {
@@ -23,7 +25,7 @@ pub fn setup_passive_mode(
 
     // Find next available socket for data connection
     let data_socket = channel_registry
-        .next_available_socket()
+        .next_available_socket(&config.bind_address, config.data_port_range())
         .ok_or(TransferError::NoAvailablePort)?;
 
     // Bind the listener
@@ -70,6 +72,7 @@ pub fn setup_active_mode(
     channel_registry: &mut ChannelRegistry,
     client_addr: SocketAddr,
     port_command_addr: &str,
+    config: &StartupConfig,
 ) -> Result<(), TransferError> {
     // Clean up any existing entry for this client (replacement behavior)
     if channel_registry.contains(&client_addr) {
@@ -91,7 +94,7 @@ pub fn setup_active_mode(
 
     // Validate port range
     let port = parsed_addr.port();
-    if port < 1024 {
+    if port < config.min_client_port {
         return Err(TransferError::InvalidPortRange(port));
     }
 

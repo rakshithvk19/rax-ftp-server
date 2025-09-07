@@ -85,10 +85,6 @@ pub struct ChannelRegistry {
 }
 
 impl ChannelRegistry {
-    /// Port range used for PASV (passive) mode data channel listeners.
-    /// The server listens on these ports to accept incoming client data connections.
-    pub const DATA_PORT_RANGE: std::ops::Range<u16> = 2122..2222;
-
     /// Inserts or replaces the data channel entry associated with the given client address.
     ///
     /// If the provided data socket is already in use by another client, it logs a warning and skips insertion.
@@ -119,9 +115,13 @@ impl ChannelRegistry {
 
     /// Attempts to find the next available socket address in the configured PASV port range
     /// that is not currently assigned to any client's data socket.
-    pub fn next_available_socket(&self) -> Option<SocketAddr> {
-        for port in Self::DATA_PORT_RANGE {
-            let data_socket: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+    pub fn next_available_socket(
+        &self,
+        bind_address: &str,
+        port_range: std::ops::Range<u16>,
+    ) -> Option<SocketAddr> {
+        for port in port_range {
+            let data_socket: SocketAddr = format!("{bind_address}:{port}").parse().unwrap();
             if !self.is_socket_taken(&data_socket) {
                 return Some(data_socket);
             }

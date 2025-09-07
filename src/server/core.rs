@@ -6,55 +6,70 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
-use crate::client::handle_client;
 use crate::client::Client;
+use crate::client::handle_client;
+use crate::config::{ServerConfig, SharedRuntimeConfig, StartupConfig};
 use crate::protocol::handle_auth_command;
 use crate::protocol::parse_command;
-use crate::server::config::ServerConfig;
 use crate::transfer::ChannelRegistry;
-
-const COMMAND_SOCKET: &str = "127.0.0.1:2121";
-const MAX_CLIENTS: usize = 10;
 
 pub struct Server {
     client_registry: Arc<Mutex<HashMap<SocketAddr, Client>>>,
     channel_registry: Arc<Mutex<ChannelRegistry>>,
     listener: TcpListener,
-    config: Arc<ServerConfig>,
+    startup_config: Arc<StartupConfig>,
+    runtime_config: SharedRuntimeConfig,
 }
 
 impl Server {
     pub async fn new() -> Self {
-        let config = Arc::new(ServerConfig::default());
+        // Load configuration from config.toml and environment
+        let config = ServerConfig::load().expect("Failed to load server configuration");
+        let (startup_config, runtime_config) = config.split();
 
-        let listener = match TcpListener::bind(COMMAND_SOCKET).await {
+        let startup_config = Arc::new(startup_config);
+
+        let listener = match TcpListener::bind(&startup_config.control_socket()).await {
             Ok(listener) => {
-                info!("Server bound to {COMMAND_SOCKET}");
+                info!("Server bound to {}", startup_config.control_socket());
                 listener
             }
             Err(e) => {
-                error!("Failed to bind to {COMMAND_SOCKET}: {e}");
-                panic!("Server startup failed on socket {COMMAND_SOCKET}: {e}");
+                error!("Failed to bind to {}: {e}", startup_config.control_socket());
+                panic!(
+                    "Server startup failed on socket {}: {e}",
+                    startup_config.control_socket()
+                );
             }
         };
 
-        // TODO: Ensure server root directory exists
-        if let Err(e) = std::fs::create_dir_all(&config.server_root) {
+        // Ensure server root directory exists
+        if let Err(e) = std::fs::create_dir_all(startup_config.server_root_path()) {
             warn!("Failed to create server root directory: {e}");
         } else {
-            info!("Server root directory: {}", config.server_root_str());
+            info!(
+                "Server root directory: {}",
+                startup_config.server_root_str()
+            );
         }
 
         Self {
             client_registry: Arc::new(Mutex::new(HashMap::new())),
             channel_registry: Arc::new(Mutex::new(ChannelRegistry::default())),
             listener,
-            config,
+            startup_config,
+            runtime_config,
         }
     }
 
     pub async fn start(&self) {
-        info!("Starting Rax FTP server on {COMMAND_SOCKET} (max {MAX_CLIENTS} clients)");
+        let runtime_config = self.runtime_config.read().await;
+        info!(
+            "Starting Rax FTP server on {} (max {} clients)",
+            self.startup_config.control_socket(),
+            runtime_config.max_clients
+        );
+        drop(runtime_config);
 
         loop {
             match self.listener.accept().await {
@@ -62,7 +77,8 @@ impl Server {
                     info!("Client {addr} connected to FTP server");
                     let client_registry = Arc::clone(&self.client_registry);
                     let channel_registry = Arc::clone(&self.channel_registry);
-                    let config = Arc::clone(&self.config);
+                    let startup_config = Arc::clone(&self.startup_config);
+                    let runtime_config = Arc::clone(&self.runtime_config);
 
                     // Spawn a task for each client so accept loop doesn't block
                     tokio::spawn(async move {
@@ -71,7 +87,8 @@ impl Server {
                             addr,
                             client_registry,
                             channel_registry,
-                            config,
+                            startup_config,
+                            runtime_config,
                         )
                         .await
                         {
@@ -93,7 +110,8 @@ async fn handle_new_client(
     client_addr: SocketAddr,
     client_registry: Arc<Mutex<HashMap<SocketAddr, Client>>>,
     channel_registry: Arc<Mutex<ChannelRegistry>>,
-    config: Arc<ServerConfig>,
+    startup_config: Arc<StartupConfig>,
+    runtime_config: SharedRuntimeConfig,
 ) -> Result<(), std::io::Error> {
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
@@ -120,7 +138,7 @@ async fn handle_new_client(
         }
 
         let command = parse_command(&line);
-        let result = handle_auth_command(&mut client, &command);
+        let result = handle_auth_command(&mut client, &command, &startup_config);
 
         if let Some(msg) = result.message {
             reader.get_mut().write_all(msg.as_bytes()).await?;
@@ -128,8 +146,9 @@ async fn handle_new_client(
 
         if client.is_logged_in() {
             let mut clients = client_registry.lock().await;
+            let runtime = runtime_config.read().await;
 
-            if clients.len() >= MAX_CLIENTS {
+            if clients.len() >= runtime.max_clients {
                 reader
                     .get_mut()
                     .write_all(b"421 Too many connections. Try again later.\r\n")
@@ -144,12 +163,13 @@ async fn handle_new_client(
                 "Authenticated client: {} ({}/{} clients)",
                 client_addr,
                 clients.len(),
-                MAX_CLIENTS
+                runtime.max_clients
             );
 
             let cmd_stream = reader.into_inner();
 
             drop(clients);
+            drop(runtime);
 
             // Hand off to session handler
             handle_client(
@@ -157,7 +177,8 @@ async fn handle_new_client(
                 client_registry,
                 client_addr,
                 channel_registry,
-                config,
+                startup_config,
+                runtime_config,
             )
             .await;
 

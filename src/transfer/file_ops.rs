@@ -5,26 +5,25 @@
 //! TCP data streams, managing errors and reporting FTP-compliant
 //! status codes and messages.
 
+use crate::config::{SharedRuntimeConfig, StartupConfig};
 use crate::protocol::CommandStatus;
 use log::{error, info, warn};
-use std::fs::{remove_file, rename, File};
+use std::fs::{File, remove_file, rename};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::thread;
 use std::time::Duration;
 
-const MAX_RETRIES: usize = 3;
-const MAX_FILE_SIZE: u64 = 100 * 1024 * 1024; // 100MB in bytes
-const BUFFER_SIZE: usize = 8192; // 8KB buffer for better performance
-
 /// Handles uploading a file from the client to the server using temporary files.
 ///
 /// This function implements atomic file uploads by writing to a temporary file first,
 /// then renaming it to the final destination on successful completion.
-pub fn handle_file_upload(
+pub async fn handle_file_upload(
     mut data_stream: TcpStream,
     final_filename: &str,
     temp_filename: &str,
+    config: &StartupConfig,
+    runtime_config: &SharedRuntimeConfig,
 ) -> Result<(CommandStatus, &'static str), (CommandStatus, &'static str)> {
     info!("Starting file upload: {temp_filename} -> {final_filename}");
 
@@ -40,8 +39,14 @@ pub fn handle_file_upload(
         }
     };
 
-    let mut buffer = [0; BUFFER_SIZE];
+    let mut buffer = vec![0; config.buffer_size];
     let mut total_bytes_received = 0u64;
+
+    // Get max file size from runtime config (since it can be updated at runtime)
+    let max_file_size = {
+        let runtime = runtime_config.read().await;
+        runtime.max_file_size_bytes()
+    };
 
     // Send initial response indicating data transfer is starting
     info!("Ready to receive data for {final_filename}");
@@ -52,18 +57,18 @@ pub fn handle_file_upload(
             match data_stream.read(&mut buffer) {
                 Ok(0) => break 0, // EOF - upload complete
                 Ok(n) => break n,
-                Err(e) if retries < MAX_RETRIES => {
+                Err(e) if retries < config.max_retries => {
                     warn!(
                         "Transient read error (attempt {}/{}): {}. Retrying...",
                         retries + 1,
-                        MAX_RETRIES,
+                        config.max_retries,
                         e
                     );
                     retries += 1;
                     thread::sleep(Duration::from_millis(100 * retries as u64));
                 }
                 Err(e) => {
-                    error!("Read failure after {MAX_RETRIES} retries: {e}");
+                    error!("Read failure after {} retries: {e}", config.max_retries);
                     // Clean up temporary file
                     let _ = remove_file(temp_filename);
                     return Err((
@@ -80,15 +85,15 @@ pub fn handle_file_upload(
 
         // Check file size limit BEFORE writing (fail fast)
         total_bytes_received += n as u64;
-        if total_bytes_received > MAX_FILE_SIZE {
+        if total_bytes_received > max_file_size {
             error!(
-                "File size limit exceeded: {total_bytes_received} bytes > {MAX_FILE_SIZE} bytes (100MB)"
+                "File size limit exceeded: {total_bytes_received} bytes > {max_file_size} bytes"
             );
             // Clean up temporary file
             let _ = remove_file(temp_filename);
             return Err((
                 CommandStatus::Failure("552 Insufficient storage space".into()),
-                "552 Insufficient storage space (file too large, max 100MB)\r\n",
+                "552 Insufficient storage space (file too large)\r\n",
             ));
         }
 
@@ -141,6 +146,7 @@ pub fn handle_file_upload(
 pub fn handle_file_download(
     mut data_stream: TcpStream,
     filename: &str,
+    config: &StartupConfig,
 ) -> Result<(CommandStatus, &'static str), (CommandStatus, &'static str)> {
     info!("Starting file download: {filename}");
 
@@ -155,7 +161,7 @@ pub fn handle_file_download(
         }
     };
 
-    let mut buffer = [0; BUFFER_SIZE];
+    let mut buffer = vec![0; config.buffer_size];
     let mut total_bytes_sent = 0u64;
 
     loop {
@@ -175,18 +181,21 @@ pub fn handle_file_download(
         loop {
             match data_stream.write_all(&buffer[..n]) {
                 Ok(_) => break,
-                Err(e) if retries < MAX_RETRIES => {
+                Err(e) if retries < config.max_retries => {
                     warn!(
                         "Transient write error (attempt {}/{}): {}. Retrying...",
                         retries + 1,
-                        MAX_RETRIES,
+                        config.max_retries,
                         e
                     );
                     retries += 1;
                     thread::sleep(Duration::from_millis(100 * retries as u64));
                 }
                 Err(e) => {
-                    error!("Write failure to data stream after {MAX_RETRIES} retries: {e}");
+                    error!(
+                        "Write failure to data stream after {} retries: {e}",
+                        config.max_retries
+                    );
                     return Err((
                         CommandStatus::Failure("426 Connection closed; transfer aborted".into()),
                         "426 Connection closed; transfer aborted\r\n",

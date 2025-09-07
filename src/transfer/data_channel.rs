@@ -5,9 +5,9 @@
 use log::{error, info};
 use std::io::Write;
 use std::net::{SocketAddr, TcpStream};
-use std::time::Duration;
 
 use crate::client::Client;
+use crate::config::{SharedRuntimeConfig, StartupConfig};
 use crate::error::TransferError;
 use crate::transfer::ChannelRegistry;
 
@@ -20,6 +20,7 @@ pub fn validate_client_and_data_channel(client: &Client) -> bool {
 pub fn setup_data_stream(
     channel_registry: &mut ChannelRegistry,
     client_addr: &SocketAddr,
+    config: &StartupConfig,
 ) -> Option<TcpStream> {
     let entry = channel_registry.get_mut(client_addr)?;
 
@@ -28,7 +29,7 @@ pub fn setup_data_stream(
         if entry.listener().is_none() {
             // Active mode: Server connects to client
             info!("Active mode: Server connecting to client at {data_socket}");
-            return connect_to_client(*data_socket);
+            return connect_to_client(*data_socket, config);
         }
     }
 
@@ -47,10 +48,12 @@ pub fn send_directory_listing(
     channel_registry: &mut ChannelRegistry,
     client_addr: &SocketAddr,
     listing: Vec<String>,
+    config: &StartupConfig,
 ) -> Result<(), TransferError> {
-    let mut data_stream = setup_data_stream(channel_registry, client_addr).ok_or_else(|| {
-        TransferError::DataChannelSetupFailed("Failed to establish data connection".into())
-    })?;
+    let mut data_stream =
+        setup_data_stream(channel_registry, client_addr, config).ok_or_else(|| {
+            TransferError::DataChannelSetupFailed("Failed to establish data connection".into())
+        })?;
 
     let listing_data = listing.join("\r\n") + "\r\n";
 
@@ -67,17 +70,28 @@ pub fn send_directory_listing(
 }
 
 /// Receives file upload over data connection
-pub fn receive_file_upload(
+pub async fn receive_file_upload(
     channel_registry: &mut ChannelRegistry,
     client_addr: &SocketAddr,
     final_filename: &str,
     temp_filename: &str,
+    startup_config: &StartupConfig,
+    runtime_config: &SharedRuntimeConfig,
 ) -> Result<(), TransferError> {
-    let data_stream = setup_data_stream(channel_registry, client_addr).ok_or_else(|| {
-        TransferError::DataChannelSetupFailed("Failed to establish data connection".into())
-    })?;
+    let data_stream =
+        setup_data_stream(channel_registry, client_addr, startup_config).ok_or_else(|| {
+            TransferError::DataChannelSetupFailed("Failed to establish data connection".into())
+        })?;
 
-    match crate::transfer::handle_file_upload(data_stream, final_filename, temp_filename) {
+    match crate::transfer::handle_file_upload(
+        data_stream,
+        final_filename,
+        temp_filename,
+        startup_config,
+        runtime_config,
+    )
+    .await
+    {
         Ok(_) => {
             info!("File upload completed successfully to {client_addr}");
             Ok(())
@@ -90,10 +104,8 @@ pub fn receive_file_upload(
 }
 
 /// Active mode: Server connects to client
-fn connect_to_client(data_socket: SocketAddr) -> Option<TcpStream> {
-    const CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
-
-    match TcpStream::connect_timeout(&data_socket, CONNECTION_TIMEOUT) {
+fn connect_to_client(data_socket: SocketAddr, config: &StartupConfig) -> Option<TcpStream> {
+    match TcpStream::connect_timeout(&data_socket, config.connection_timeout()) {
         Ok(stream) => {
             info!("Connected to client at {data_socket}");
             Some(stream)

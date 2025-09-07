@@ -10,15 +10,15 @@ use std::pin::Pin;
 
 use crate::auth;
 use crate::client::Client;
+use crate::config::{SharedRuntimeConfig, StartupConfig};
 use crate::error::AuthError;
 use crate::error::TransferError;
 use crate::navigate;
 use crate::protocol::{Command, CommandResult, CommandStatus};
-use crate::server::config::ServerConfig;
 use crate::storage;
 use crate::transfer::{
-    self, receive_file_upload, send_directory_listing, setup_data_stream,
-    validate_client_and_data_channel, ChannelRegistry,
+    self, ChannelRegistry, receive_file_upload, send_directory_listing, setup_data_stream,
+    validate_client_and_data_channel,
 };
 
 /// Dispatches a received FTP command to its corresponding handler.
@@ -29,7 +29,8 @@ pub async fn handle_command<F>(
     client: &mut Client,
     command: &Command,
     channel_registry: &mut ChannelRegistry,
-    config: &ServerConfig,
+    startup_config: &StartupConfig,
+    runtime_config: &SharedRuntimeConfig,
     send_intermediate: &F,
 ) -> CommandResult
 where
@@ -37,9 +38,18 @@ where
 {
     match command {
         Command::QUIT => handle_cmd_quit(client, channel_registry),
-        Command::USER(username) => handle_cmd_user(client, username),
-        Command::PASS(password) => handle_cmd_pass(client, password),
-        Command::LIST => handle_cmd_list(client, config, channel_registry, send_intermediate).await,
+        Command::USER(username) => handle_cmd_user(client, username, startup_config),
+        Command::PASS(password) => handle_cmd_pass(client, password, startup_config),
+        Command::LIST => {
+            handle_cmd_list(
+                client,
+                startup_config,
+                runtime_config,
+                channel_registry,
+                send_intermediate,
+            )
+            .await
+        }
         Command::PWD => handle_cmd_pwd(client),
         Command::LOGOUT => handle_cmd_logout(client, channel_registry),
         Command::RETR(filename) => {
@@ -47,7 +57,8 @@ where
                 client,
                 filename,
                 channel_registry,
-                config,
+                startup_config,
+                runtime_config,
                 send_intermediate,
             )
             .await
@@ -57,29 +68,33 @@ where
                 client,
                 filename,
                 channel_registry,
-                config,
+                startup_config,
+                runtime_config,
                 send_intermediate,
             )
             .await
         }
-        Command::DEL(filename) => handle_cmd_del(client, filename, config),
-        Command::CWD(path) => handle_cmd_cwd(client, path, config),
-        Command::PASV => handle_cmd_pasv(client, channel_registry),
-        Command::PORT(addr) => handle_cmd_port(client, channel_registry, addr),
+        Command::DEL(filename) => handle_cmd_del(client, filename, startup_config),
+        Command::CWD(path) => handle_cmd_cwd(client, path, startup_config),
+        Command::PASV => handle_cmd_pasv(client, channel_registry, startup_config),
+        Command::PORT(addr) => handle_cmd_port(client, channel_registry, addr, startup_config),
         Command::RAX => handle_cmd_rax(),
         Command::UNKNOWN => handle_cmd_unknown(),
     }
 }
 
 /// Handles authentication commands during the login phase
-pub fn handle_auth_command(client: &mut Client, command: &Command) -> CommandResult {
+pub fn handle_auth_command(
+    client: &mut Client,
+    command: &Command,
+    startup_config: &StartupConfig,
+) -> CommandResult {
     match command {
-        Command::USER(username) => handle_cmd_user(client, username),
-        Command::PASS(password) => handle_cmd_pass(client, password),
+        Command::USER(username) => handle_cmd_user(client, username, startup_config),
+        Command::PASS(password) => handle_cmd_pass(client, password, startup_config),
         _ => CommandResult {
             status: CommandStatus::Failure("Authentication required".into()),
             message: Some("530 Please login with USER and PASS\r\n".into()),
-            //
         },
     }
 }
@@ -111,13 +126,17 @@ fn handle_cmd_quit(client: &mut Client, channel_registry: &mut ChannelRegistry) 
 }
 
 /// Handles the USER command
-fn handle_cmd_user(client: &mut Client, username: &str) -> CommandResult {
-    match auth::validate_user(username) {
+fn handle_cmd_user(
+    client: &mut Client,
+    username: &str,
+    startup_config: &StartupConfig,
+) -> CommandResult {
+    match auth::validate_user(username, startup_config) {
         Ok(_) => {
             // Update client state based on successful validation
             client.set_user_valid(true);
             client.set_logged_in(false);
-            let _ = client.set_username(Some(username.to_string()));
+            let _ = client.set_username(Some(username.to_string()), startup_config);
             CommandResult {
                 status: CommandStatus::Success,
                 message: Some("331 Password required\r\n".into()),
@@ -127,7 +146,7 @@ fn handle_cmd_user(client: &mut Client, username: &str) -> CommandResult {
             // Clear client state on validation failure
             client.set_user_valid(false);
             client.set_logged_in(false);
-            let _ = client.set_username(None);
+            let _ = client.set_username(None, startup_config);
 
             let (code, message) = match error {
                 AuthError::InvalidUsername(u) => (530, format!("Invalid username: {u}")),
@@ -145,7 +164,11 @@ fn handle_cmd_user(client: &mut Client, username: &str) -> CommandResult {
 }
 
 /// Handles the PASS command
-fn handle_cmd_pass(client: &mut Client, password: &str) -> CommandResult {
+fn handle_cmd_pass(
+    client: &mut Client,
+    password: &str,
+    startup_config: &StartupConfig,
+) -> CommandResult {
     // Check if user was validated first
     if !client.is_user_valid() {
         return CommandResult {
@@ -164,7 +187,7 @@ fn handle_cmd_pass(client: &mut Client, password: &str) -> CommandResult {
         }
     };
 
-    match auth::validate_password(&username, password) {
+    match auth::validate_password(&username, password, startup_config) {
         Ok(_) => {
             // Update client state for successful login
             client.set_logged_in(true);
@@ -192,13 +215,14 @@ fn handle_cmd_pass(client: &mut Client, password: &str) -> CommandResult {
     }
 }
 
+/// Handles the LIST command
 async fn handle_cmd_list<F>(
     client: &mut Client,
-    config: &ServerConfig,
+    startup_config: &StartupConfig,
+    _runtime_config: &SharedRuntimeConfig,
     channel_registry: &mut ChannelRegistry,
-    send_intermediate: &F, // For sending 150 immediately
+    send_intermediate: &F,
 ) -> CommandResult
-// Still return CommandResult!
 where
     F: Fn(&str) -> Pin<Box<dyn Future<Output = Result<(), std::io::Error>> + Send>>,
 {
@@ -239,8 +263,10 @@ where
     };
 
     // Get directory listing
-    let entries = match storage::list_directory(&config.server_root, client.current_virtual_path())
-    {
+    let entries = match storage::list_directory(
+        &startup_config.server_root_path(),
+        client.current_virtual_path(),
+    ) {
         Ok(entries) => entries,
         Err(error) => {
             let (code, message) = match error {
@@ -261,7 +287,7 @@ where
     };
 
     // Send directory listing over data channel
-    match send_directory_listing(channel_registry, &client_addr, entries) {
+    match send_directory_listing(channel_registry, &client_addr, entries, startup_config) {
         Ok(_) => {
             // Clean up the stream but keep persistent setup
             transfer::cleanup_data_stream_only(channel_registry, &client_addr);
@@ -280,6 +306,7 @@ where
         }
     }
 }
+
 /// Handles the PWD command
 fn handle_cmd_pwd(client: &Client) -> CommandResult {
     // Authentication check
@@ -336,7 +363,8 @@ async fn handle_cmd_retr<F>(
     client: &mut Client,
     filename: &str,
     channel_registry: &mut ChannelRegistry,
-    config: &ServerConfig,
+    startup_config: &StartupConfig,
+    _runtime_config: &SharedRuntimeConfig,
     send_intermediate: &F,
 ) -> CommandResult
 where
@@ -369,9 +397,10 @@ where
 
     // Prepare file retrieval
     let file_path = match storage::prepare_file_retrieval(
-        &config.server_root,
+        &startup_config.server_root_path(),
         client.current_virtual_path(),
         filename,
+        startup_config,
     ) {
         Ok(path) => path,
         Err(error) => {
@@ -411,7 +440,7 @@ where
     );
 
     // Setup data stream and perform file download
-    let data_stream = match setup_data_stream(channel_registry, &client_addr) {
+    let data_stream = match setup_data_stream(channel_registry, &client_addr, startup_config) {
         Some(stream) => stream,
         None => {
             return CommandResult {
@@ -422,7 +451,11 @@ where
     };
 
     // Delegate file download to transfer module
-    match crate::transfer::handle_file_download(data_stream, &file_path.to_string_lossy()) {
+    match crate::transfer::handle_file_download(
+        data_stream,
+        &file_path.to_string_lossy(),
+        startup_config,
+    ) {
         Ok((status, _)) => {
             // Clean up only the data stream, keep persistent setup
             transfer::cleanup_data_stream_only(channel_registry, &client_addr);
@@ -449,7 +482,8 @@ async fn handle_cmd_stor<F>(
     client: &mut Client,
     filename: &str,
     channel_registry: &mut ChannelRegistry,
-    config: &ServerConfig,
+    startup_config: &StartupConfig,
+    runtime_config: &SharedRuntimeConfig,
     send_intermediate: &F,
 ) -> CommandResult
 where
@@ -482,9 +516,10 @@ where
 
     // Prepare file storage
     let (file_path, temp_path) = match storage::prepare_file_storage(
-        &config.server_root,
+        &startup_config.server_root_path(),
         client.current_virtual_path(),
         filename,
+        startup_config,
     ) {
         Ok((file_path, temp_path)) => (file_path, temp_path),
         Err(error) => {
@@ -532,7 +567,11 @@ where
         &client_addr,
         &file_path.to_string_lossy(),
         &temp_path.to_string_lossy(),
-    ) {
+        startup_config,
+        runtime_config,
+    )
+    .await
+    {
         Ok(_) => {
             // Clean up the stream but keep persistent setup
             transfer::cleanup_data_stream_only(channel_registry, &client_addr);
@@ -553,7 +592,11 @@ where
 }
 
 /// Handles the DEL command
-fn handle_cmd_del(client: &Client, filename: &str, config: &ServerConfig) -> CommandResult {
+fn handle_cmd_del(
+    client: &Client,
+    filename: &str,
+    startup_config: &StartupConfig,
+) -> CommandResult {
     // Authentication check
     if !client.is_logged_in() {
         return CommandResult {
@@ -563,7 +606,12 @@ fn handle_cmd_del(client: &Client, filename: &str, config: &ServerConfig) -> Com
     }
 
     // Delete file
-    match storage::delete_file(&config.server_root, client.current_virtual_path(), filename) {
+    match storage::delete_file(
+        &startup_config.server_root_path(),
+        client.current_virtual_path(),
+        filename,
+        startup_config,
+    ) {
         Ok(_) => {
             info!(
                 "Client {} deleted file {}",
@@ -598,7 +646,11 @@ fn handle_cmd_del(client: &Client, filename: &str, config: &ServerConfig) -> Com
 }
 
 /// Handles the CWD command
-fn handle_cmd_cwd(client: &mut Client, path: &str, config: &ServerConfig) -> CommandResult {
+fn handle_cmd_cwd(
+    client: &mut Client,
+    path: &str,
+    startup_config: &StartupConfig,
+) -> CommandResult {
     // Authentication check
     if !client.is_logged_in() {
         return CommandResult {
@@ -608,7 +660,12 @@ fn handle_cmd_cwd(client: &mut Client, path: &str, config: &ServerConfig) -> Com
     }
 
     // Change directory
-    match navigate::change_directory(&config.server_root, client.current_virtual_path(), path) {
+    match navigate::change_directory(
+        &startup_config.server_root_path(),
+        client.current_virtual_path(),
+        path,
+        startup_config,
+    ) {
         Ok(new_virtual_path) => {
             // Update client's virtual path
             let _ = client.set_current_virtual_path(new_virtual_path.clone());
@@ -652,7 +709,11 @@ fn handle_cmd_cwd(client: &mut Client, path: &str, config: &ServerConfig) -> Com
 }
 
 /// Handles the PASV command
-fn handle_cmd_pasv(client: &mut Client, channel_registry: &mut ChannelRegistry) -> CommandResult {
+fn handle_cmd_pasv(
+    client: &mut Client,
+    channel_registry: &mut ChannelRegistry,
+    startup_config: &StartupConfig,
+) -> CommandResult {
     // Authentication check
     if !client.is_logged_in() {
         return CommandResult {
@@ -672,7 +733,7 @@ fn handle_cmd_pasv(client: &mut Client, channel_registry: &mut ChannelRegistry) 
     };
 
     // Setup passive mode (this will replace any existing setup)
-    match transfer::setup_passive_mode(channel_registry, client_addr) {
+    match transfer::setup_passive_mode(channel_registry, client_addr, startup_config) {
         Ok(data_socket) => {
             client.set_data_channel_init(true);
             info!(
@@ -707,6 +768,7 @@ fn handle_cmd_port(
     client: &mut Client,
     channel_registry: &mut ChannelRegistry,
     addr: &str,
+    startup_config: &StartupConfig,
 ) -> CommandResult {
     // Authentication check
     if !client.is_logged_in() {
@@ -727,7 +789,7 @@ fn handle_cmd_port(
     };
 
     // Setup active mode (this will replace any existing setup)
-    match transfer::setup_active_mode(channel_registry, client_addr, addr) {
+    match transfer::setup_active_mode(channel_registry, client_addr, addr, startup_config) {
         Ok(_) => {
             client.set_data_channel_init(true);
             CommandResult {
@@ -744,7 +806,10 @@ fn handle_cmd_port(
                 ),
                 TransferError::InvalidPortRange(port) => (
                     501,
-                    format!("Port {port} out of range (must be 1024-65535)"),
+                    format!(
+                        "Port {port} out of range (must be >= {})",
+                        startup_config.min_client_port
+                    ),
                 ),
                 _ => (425, "Active mode setup failed".to_string()),
             };
@@ -761,7 +826,6 @@ fn handle_cmd_rax() -> CommandResult {
     CommandResult {
         status: CommandStatus::Success,
         message: Some("200 Rax is the best\r\n".into()),
-        //
     }
 }
 
@@ -770,6 +834,5 @@ fn handle_cmd_unknown() -> CommandResult {
     CommandResult {
         status: CommandStatus::Failure("Unknown command".into()),
         message: Some("500 Syntax error, command unrecognized\r\n".into()),
-        //
     }
 }

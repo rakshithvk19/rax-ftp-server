@@ -1,0 +1,17 @@
+services:
+  rax-ftp-server:
+    build: .
+    container_name: rax-ftp-server
+    ports:
+      - "2121:2121"           # FTP control connection
+      - "2122-2222:2122-2222" # PASV data connections
+    environment:
+      - RUST_LOG=info
+      - RAX_FTP_BIND_ADDRESS=0.0.0.0
+      - RAX_FTP_SERVER_ROOT=/app/rax-ftp-server/server_root
+      - RAX_FTP_CONTROL_PORT=2121
+      - RAX_FTP_DATA_PORT_MIN=2122
+      - RAX_FTP_DATA_PORT_MAX=2222
+    volumes:
+      - ./server_root:/app/rax-ftp-server/server_root
+    restart: unless-stopped
