@@ -33,6 +33,7 @@ Thumbs.db
 TODO.md
 
 server_root/
+misc_ignore/
 
 # Environment files (contain secrets)
 .env

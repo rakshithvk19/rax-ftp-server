@@ -3,8 +3,8 @@ services:
     build: .
     container_name: rax-ftp-server
     ports:
-      - "2121:2121"           # FTP control connection
-      - "2122-2222:2122-2222" # PASV data connections
+      - "2121:2121"           
+      - "2122-2222:2122-2222" 
     environment:
       - RUST_LOG=info
       - RAX_FTP_BIND_ADDRESS=0.0.0.0
