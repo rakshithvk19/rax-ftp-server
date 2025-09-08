@@ -14,4 +14,13 @@ services:
       - RAX_FTP_DATA_PORT_MAX=2222
     volumes:
       - ./server_root:/app/rax-ftp-server/server_root
+    stdin_open: true
+    tty: true
+    networks:
+      - rax-ftp-network
     restart: unless-stopped
+
+networks:
+  rax-ftp-network:
+    name: rax-ftp-network    
+    driver: bridge
