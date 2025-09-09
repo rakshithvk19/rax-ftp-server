@@ -7,20 +7,28 @@ services:
       - "2122-2222:2122-2222" 
     environment:
       - RUST_LOG=info
-      - RAX_FTP_BIND_ADDRESS=0.0.0.0
+      - RAX_FTP_BIND_ADDRESS=172.20.0.10
       - RAX_FTP_SERVER_ROOT=/app/rax-ftp-server/server_root
       - RAX_FTP_CONTROL_PORT=2121
       - RAX_FTP_DATA_PORT_MIN=2122
       - RAX_FTP_DATA_PORT_MAX=2222
     volumes:
-      - ./server_root:/app/rax-ftp-server/server_root
+      - server_data:/app/rax-ftp-server/server_root  
     stdin_open: true
     tty: true
     networks:
-      - rax-ftp-network
+      rax-ftp-network:
+        ipv4_address: 172.20.0.10
     restart: unless-stopped
 
 networks:
   rax-ftp-network:
     name: rax-ftp-network    
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+          gateway: 172.20.0.1
+
+volumes:
+  server_data:  

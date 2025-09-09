@@ -9,9 +9,8 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # IP address to bind the FTP control connection
-# Use "0.0.0.0" for Docker containers to accept external connections
 # Environment: RAX_FTP_BIND_ADDRESS
-bind_address = "0.0.0.0"
+bind_address = "172.20.0.10"
 
 # Port for FTP control connection
 # Environment: RAX_FTP_CONTROL_PORT
@@ -30,7 +29,7 @@ max_clients = 10
 # Root directory for FTP file operations
 # Use absolute path like "/app/server_root" for Docker containers
 # Environment: RAX_FTP_SERVER_ROOT
-server_root = "./server_root"
+server_root = "/app/rax-ftp-server/server_root"
 
 # Maximum file upload size in megabytes
 # Environment: RAX_FTP_MAX_FILE_SIZE_MB
