@@ -1,0 +1,106 @@
+#!/bin/sh
+#
+# Pre-commit hook for rax-ftp-server
+# This hook runs cargo fmt and cargo clippy before allowing commits
+# Place this file at: .git/hooks/pre-commit and make it executable
+#
+
+set -e  # Exit on any error
+
+echo " Running pre-commit checks for rax-ftp-server..."
+
+# Check if we're in a Rust project
+if [ ! -f "Cargo.toml" ]; then
+    echo " Cargo.toml not found. Are you in the rax-ftp-server directory?"
+    exit 1
+fi
+
+# Check for staged Rust files
+RUST_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || true)
+if [ -z "$RUST_FILES" ]; then
+    echo "  No Rust files staged for commit. Skipping Rust checks."
+    exit 0
+fi
+
+echo " Found staged Rust files:"
+echo "$RUST_FILES" | sed 's/^/  - /'
+echo
+
+# 1. Check code formatting
+echo " Checking code formatting with cargo fmt..."
+if ! cargo fmt --all -- --check; then
+    echo
+    echo " Code formatting check FAILED!"
+    echo " Run 'cargo fmt --all' to fix formatting issues."
+    echo "   Then stage your changes and commit again."
+    exit 1
+fi
+echo " Code formatting check passed!"
+echo
+
+# 2. Run clippy with warnings as errors
+echo " Running clippy analysis..."
+export RUSTFLAGS="-Dwarnings"
+if ! cargo clippy --all-targets --all-features -- -D warnings; then
+    echo
+    echo " Clippy found warnings or errors!"
+    echo " Fix all clippy warnings before committing."
+    echo "   Run 'cargo clippy --all-targets --all-features' to see details."
+    exit 1
+fi
+echo " Clippy analysis passed!"
+echo
+
+# 3. Compilation check
+echo " Running quick compilation check..."
+if ! cargo check --all-targets --all-features; then
+    echo
+    echo " Compilation check FAILED!"
+    echo " Fix compilation errors before committing."
+    exit 1
+fi
+echo " Compilation check passed!"
+echo
+
+# 4. Check for sensitive data
+echo "Checking for sensitive data..."
+# Check for potential secrets 
+if git diff --cached --name-only | xargs grep -E "(password|secret|token|key)(\s)?=(\s)?['\"][^'\"]+['\"]" 2>/dev/null; then
+    echo "Warning: Potential hardcoded secrets detected!"
+    echo "Please review the above matches"
+    read -p "Continue anyway? (y/n): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+fi
+
+# 5. Check for TODO/FIXME in staged files
+TODO_COUNT=$(git diff --cached --name-only | xargs grep -c "TODO\|FIXME" 2>/dev/null || true)
+if [ "$TODO_COUNT" -gt 0 ]; then
+    echo "Found $TODO_COUNT TODO/FIXME comments in staged files"
+fi
+
+# 6. Verify Cargo.lock is committed (for binary projects)
+if [ -f "Cargo.lock" ]; then
+    if ! git diff --cached --name-only | grep -q "Cargo.lock"; then
+        if [ -n "$(git status --porcelain Cargo.lock)" ]; then
+            echo "Cargo.lock has changes but is not staged"
+            echo "Run 'git add Cargo.lock' if dependencies changed"
+        fi
+    fi
+fi
+
+# 7. Check file sizes (prevent large files)
+MAX_SIZE=5242880  # 5MB in bytes
+for file in $(git diff --cached --name-only); do
+    if [ -f "$file" ]; then
+        size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null)
+        if [ "$size" -gt "$MAX_SIZE" ]; then
+            echo "File $file is larger than 5MB"
+            exit 1
+        fi
+    fi
+done
+
+echo "All pre-commit checks passed!"

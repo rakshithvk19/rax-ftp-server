@@ -1,0 +1,61 @@
+#!/bin/sh
+# .git/hooks/commit-msg
+# Commit message validation hook for RAX FTP Client
+
+# Read the commit message
+commit_regex='^(feat|fix|docs|style|refactor|perf|test|chore|build|ci)(\(.+\))?: .{1,72}$'
+error_msg="Commit message doesn't follow conventional format!
+
+Expected format:
+  <type>(<scope>): <subject>
+
+Types:
+  feat:     New feature
+  fix:      Bug fix
+  docs:     Documentation changes
+  style:    Code style changes (formatting, semicolons, etc)
+  refactor: Code refactoring
+  perf:     Performance improvements
+  test:     Adding or updating tests
+  chore:    Maintenance tasks
+  build:    Build system changes
+  ci:       CI/CD changes
+
+Examples:
+  feat(server): add passive mode support
+  fix(client): handle connection timeout properly
+  docs: update README with Docker instructions
+  test(auth): add unit tests for user validation
+
+Your commit message:"
+
+# Get the first line of the commit message
+first_line=$(head -n1 "$1")
+
+echo "$first_line"
+
+if ! echo "$first_line" | grep -qE "$commit_regex"; then
+    echo "$error_msg"
+    echo "  $first_line"
+    echo ""
+    echo "Please fix your commit message format."
+    exit 1
+fi
+
+# Check commit message length
+if [ ${#first_line} -gt 72 ]; then
+    echo "Commit message is too long (${#first_line} > 72 characters)"
+    exit 1
+fi
+
+# Check for WIP commits
+if echo "$first_line" | grep -qi "wip\|work in progress"; then
+    echo "WIP commit detected!"
+    read -p "Are you sure you want to commit WIP? (y/n): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+fi
+
+echo "Commit message validation passed!"
