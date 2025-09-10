@@ -91,7 +91,7 @@ impl ServerConfig {
             {
                 Ok(settings) => {
                     let config: ServerConfig = settings.try_deserialize()?;
-                    // config.validate()?;
+                    config.validate()?;
                     return Ok(config);
                 }
                 Err(e) => {
